@@ -1,0 +1,92 @@
+{
+  "name": "ainonymous",
+  "version": "1.0.1",
+  "description": "Local proxy that anonymizes sensitive data before it reaches LLM APIs",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "dashboard",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "THREAT_MODEL.md",
+    "CHANGELOG.md"
+  ],
+  "bin": {
+    "ainonymous": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ tests/",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "check": "tsc --noEmit && eslint src/ tests/",
+    "prepublishOnly": "npm run check && npm run build && npm test"
+  },
+  "keywords": [
+    "llm",
+    "proxy",
+    "anonymization",
+    "pseudonymization",
+    "privacy",
+    "pii",
+    "claude",
+    "anthropic",
+    "openai",
+    "cursor",
+    "aider",
+    "cody",
+    "continue",
+    "copilot",
+    "data-masking",
+    "ai-security",
+    "compliance",
+    "gdpr",
+    "hipaa",
+    "pci-dss",
+    "tree-sitter",
+    "ast",
+    "redaction",
+    "security"
+  ],
+  "author": "A-Som-Dev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/A-Som-Dev/ainonymity.git"
+  },
+  "bugs": {
+    "url": "https://github.com/A-Som-Dev/ainonymity/issues"
+  },
+  "homepage": "https://github.com/A-Som-Dev/ainonymity#readme",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "js-yaml": "^4.1.1",
+    "openredaction": "1.1.2",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.20.8"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
+    "eslint": "^10.2.0",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          TARBALL=$(npm pack --silent)
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
+
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1
+
+      - name: Sign tarball with cosign (keyless)
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          cosign sign-blob --yes "$TARBALL" \
+            --bundle "$TARBALL.sigstore.json" \
+            --output-signature "$TARBALL.sig" \
+            --output-certificate "$TARBALL.pem"
+
+      - name: Sign SBOM with cosign (keyless)
+        run: |
+          cosign sign-blob --yes sbom.cdx.json \
+            --bundle sbom.cdx.json.sigstore.json \
+            --output-signature sbom.cdx.json.sig \
+            --output-certificate sbom.cdx.json.pem
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ steps.pack.outputs.tarball }}
+            ${{ steps.pack.outputs.tarball }}.sha256
+            ${{ steps.pack.outputs.tarball }}.sig
+            ${{ steps.pack.outputs.tarball }}.pem
+            ${{ steps.pack.outputs.tarball }}.sigstore.json
+            sbom.cdx.json
+            sbom.cdx.json.sig
+            sbom.cdx.json.pem
+            sbom.cdx.json.sigstore.json
+          body: |
+            ## Verifying this release
+
+            This release is signed with [Sigstore](https://sigstore.dev) using GitHub Actions OIDC (keyless).
+            The npm package additionally carries an [npm provenance attestation](https://docs.npmjs.com/generating-provenance-statements).
+
+            ```bash
+            # Verify the tarball signature
+            cosign verify-blob ${{ steps.pack.outputs.tarball }} \
+              --bundle ${{ steps.pack.outputs.tarball }}.sigstore.json \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+            # Verify the npm package provenance (run this from a project that has ainonymous installed)
+            npm audit signatures
+            ```
+
+            See [SECURITY.md](https://github.com/${{ github.repository }}/blob/main/SECURITY.md#verifying-release-artifacts) for the full verification guide.

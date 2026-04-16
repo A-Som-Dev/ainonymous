@@ -1,0 +1,93 @@
+# AInonymity Enterprise Configuration Template
+# Copy this file to your project root as .ainonymity.yml and customize.
+
+version: 1
+
+# Layer 1: Secret patterns (permanent redaction)
+# Custom regex patterns for secrets specific to your organization.
+# Built-in patterns (API keys, passwords, tokens, connection strings) are always active.
+secrets:
+  patterns:
+    - name: internal-api-key
+      regex: "INTERNAL_[A-Z_]+_KEY=[A-Za-z0-9+/=]{20,}"
+    - name: vault-token
+      regex: "hvs\\.[A-Za-z0-9]{24,}"
+
+# Layer 2: Identity protection
+identity:
+  # Your company name (used for package path anonymization, e.g. de.company.project)
+  company: acme
+
+  # Company email domains and internal hostnames
+  domains:
+    - acme.com
+    - acme.internal
+    - gitlab.acme.com
+    - jira.acme.com
+
+  # Team members whose names should be anonymized
+  # Tip: run `git log --format='%aN' | sort -u` to get contributors
+  people:
+    - Jane Smith
+    - John Doe
+
+# Layer 3: Code semantics
+code:
+  # Primary language (typescript, javascript, java, kotlin, python, php, go, rust, csharp)
+  language: java
+
+  # Business domain terms that should be pseudonymized in identifiers
+  # e.g. "Customer" in CustomerService becomes "AlphaService"
+  domain_terms:
+    - Customer
+    - Invoice
+    - Payment
+    - Account
+    - Employee
+
+  # Identifiers that should never be anonymized (framework classes, library names)
+  preserve:
+    - SpringBootApplication
+    - RestController
+    - Autowired
+    - RequestMapping
+
+  # Glob patterns for files requiring extra-aggressive anonymization.
+  # All identifiers will be anonymized, not just domain terms.
+  # Note: applies only during `ainonymous scan` — the live proxy has no file context.
+  sensitive_paths:
+    - .env
+    - .env.*
+    - "**/*.pem"
+    - "**/*.key"
+    - src/internal/**
+    - config/secrets/**
+
+  # Glob patterns for files where function bodies and top-level values are redacted.
+  # Note: applies only during `ainonymous scan`. For proxy-time body redaction,
+  # annotate source code with `// @ainonymity:redact` above the function.
+  redact_bodies:
+    - src/auth/**
+    - src/crypto/**
+
+# Proxy behavior
+behavior:
+  # Show interactive prompts for ambiguous matches
+  interactive: true
+
+  # Enable audit logging (JSONL format)
+  audit_log: true
+
+  # Audit log directory
+  audit_dir: ./ainonymity-audit
+
+  # Enable live dashboard at /dashboard
+  dashboard: true
+
+  # Local proxy port
+  port: 8100
+
+  # Upstream API endpoints
+  upstream:
+    anthropic: https://api.anthropic.com
+    openai: https://api.openai.com

@@ -1,0 +1,30 @@
+version: 1
+
+secrets:
+  patterns:
+    - name: internal-key
+      regex: "ASOM_[A-Z_]+_KEY=[^\\s]+"
+
+identity:
+  company: "Asom GmbH"
+  domains: ["asom.de", "asom.internal"]
+  people: ["Artur Sommer"]
+
+code:
+  language: typescript
+  domain_terms:
+    - Customer
+    - Order
+  preserve:
+    - Express
+    - Prisma
+  sensitive_paths:
+    - src/billing/**
+  redact_bodies:
+    - src/pricing/margin.ts
+
+behavior:
+  interactive: true
+  audit_log: true
+  dashboard: true
+  port: 8100

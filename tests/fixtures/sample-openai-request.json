@@ -1,0 +1,16 @@
+{
+  "model": "gpt-4o",
+  "max_tokens": 4096,
+  "temperature": 0.7,
+  "stream": true,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are helping with the Asom GmbH customer portal. The main developer is Artur Sommer (artur@asom.de)."
+    },
+    {
+      "role": "user",
+      "content": "Here's the code:\n\nclass CustomerService {\n  private db_password = \"hunter2!\";\n  private apiUrl = \"https://api.asom.internal/v2\";\n\n  async getCustomer(id: string) {\n    const response = await fetch(`${this.apiUrl}/customers/${id}`, {\n      headers: { 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiJ9.test.signature' }\n    });\n    return response.json();\n  }\n}\n\nPlease review this code."
+    }
+  ]
+}

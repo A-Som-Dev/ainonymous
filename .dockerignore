@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+node_modules
+dist
+coverage
+tests
+ainonymity-audit
+*.md
+Makefile
+.eslintrc.cjs
+.prettierrc
+vitest.config.ts
