@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import type { AInonymityConfig } from '../types.js';
+import type { AInonymousConfig } from '../types.js';
 import { DEFAULT_CONFIG } from './schema.js';
 
 const FREE_PROVIDERS = new Set([
@@ -118,7 +118,7 @@ function detectDomainTerms(dir: string, company: string): string[] {
   return [...new Set(terms)];
 }
 
-export function autoDetect(dir: string): AInonymityConfig {
+export function autoDetect(dir: string): AInonymousConfig {
   const config = structuredClone(DEFAULT_CONFIG);
   const { company, domains } = detectCompany(dir);
 

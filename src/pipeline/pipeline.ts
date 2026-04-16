@@ -1,4 +1,4 @@
-import type { AInonymityConfig, AnonymizeResult, PipelineContext, Replacement } from '../types.js';
+import type { AInonymousConfig, AnonymizeResult, PipelineContext, Replacement } from '../types.js';
 import type { AuditLogger } from '../audit/logger.js';
 import { escapeRegex } from '../shared.js';
 import { broadcastStats, broadcastEntry } from '../audit/dashboard.js';
@@ -15,10 +15,10 @@ export class Pipeline {
   private secrets = new SecretsLayer();
   private identity: IdentityLayer;
   private code: CodeLayer;
-  private config: AInonymityConfig;
+  private config: AInonymousConfig;
   private logger?: AuditLogger;
 
-  constructor(config: AInonymityConfig, logger?: AuditLogger) {
+  constructor(config: AInonymousConfig, logger?: AuditLogger) {
     this.config = config;
     this.logger = logger;
     const persist = config.session?.persist === true;

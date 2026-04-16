@@ -190,9 +190,9 @@ describe('createProxyServer', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/plain');
     const text = await res.text();
-    expect(text).toContain('# HELP ainonymity_uptime_seconds');
-    expect(text).toContain('# TYPE ainonymity_requests_total counter');
-    expect(text).toMatch(/ainonymity_requests_total\s+\d+/);
+    expect(text).toContain('# HELP ainonymous_uptime_seconds');
+    expect(text).toContain('# TYPE ainonymous_requests_total counter');
+    expect(text).toMatch(/ainonymous_requests_total\s+\d+/);
   });
 
   it('exposes legacy JSON stats at /metrics/json', async () => {
@@ -232,7 +232,7 @@ describe('createProxyServer', () => {
 
     const res = await fetch(`http://127.0.0.1:${port}/metrics`);
     const text = await res.text();
-    expect(text).toMatch(/ainonymity_replacements_total\{layer="secrets"\}\s+[1-9]/);
+    expect(text).toMatch(/ainonymous_replacements_total\{layer="secrets"\}\s+[1-9]/);
   });
 
   it('returns 404 for unknown paths', async () => {

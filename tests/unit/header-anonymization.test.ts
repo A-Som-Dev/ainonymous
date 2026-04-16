@@ -4,14 +4,14 @@ import { Pipeline } from '../../src/pipeline/pipeline.js';
 import { AuditLogger } from '../../src/audit/logger.js';
 import { getDefaults } from '../../src/config/loader.js';
 import { initParser } from '../../src/ast/extractor.js';
-import type { AInonymityConfig } from '../../src/types.js';
+import type { AInonymousConfig } from '../../src/types.js';
 
-function buildPipeline(cfg?: Partial<AInonymityConfig>): {
+function buildPipeline(cfg?: Partial<AInonymousConfig>): {
   pipeline: Pipeline;
   logger: AuditLogger;
 } {
   const base = getDefaults();
-  const merged: AInonymityConfig = {
+  const merged: AInonymousConfig = {
     ...base,
     ...cfg,
     identity: {

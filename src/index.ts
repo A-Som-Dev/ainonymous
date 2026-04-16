@@ -1,4 +1,4 @@
-export const VERSION = '1.1.0';
+export const VERSION = '1.1.1';
 
 export { Pipeline } from './pipeline/pipeline.js';
 export { BiMap } from './session/map.js';
@@ -9,7 +9,7 @@ export { GlossaryManager } from './glossary/manager.js';
 export { generateHookConfig } from './hooks/cc-hooks.js';
 
 export type {
-  AInonymityConfig,
+  AInonymousConfig,
   Layer,
   AnonymizeResult,
   Replacement,

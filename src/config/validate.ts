@@ -1,4 +1,4 @@
-import type { AInonymityConfig } from '../types.js';
+import type { AInonymousConfig } from '../types.js';
 
 const KNOWN_TOP_KEYS = new Set(['version', 'secrets', 'identity', 'code', 'behavior', 'session']);
 const KNOWN_BEHAVIOR_KEYS = new Set([
@@ -191,4 +191,4 @@ export function hasErrors(issues: ValidationIssue[]): boolean {
   return issues.some((i) => i.severity === 'error');
 }
 
-export type { AInonymityConfig };
+export type { AInonymousConfig };

@@ -1,6 +1,6 @@
-import type { AInonymityConfig } from '../types.js';
+import type { AInonymousConfig } from '../types.js';
 
-export const DEFAULT_CONFIG: AInonymityConfig = {
+export const DEFAULT_CONFIG: AInonymousConfig = {
   version: 1,
   secrets: { patterns: [] },
   identity: { company: '', domains: [], people: [] },

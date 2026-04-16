@@ -23,7 +23,7 @@ export interface Layer {
 
 export interface PipelineContext {
   sessionMap: SessionMap;
-  config: AInonymityConfig;
+  config: AInonymousConfig;
   filePath?: string;
 }
 
@@ -37,7 +37,7 @@ export interface SessionMap {
   clear(): void;
 }
 
-export interface AInonymityConfig {
+export interface AInonymousConfig {
   version: number;
   secrets: SecretsConfig;
   identity: IdentityConfig;

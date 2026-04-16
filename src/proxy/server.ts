@@ -1,6 +1,6 @@
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
-import type { AInonymityConfig, ApiFormat } from '../types.js';
+import type { AInonymousConfig, ApiFormat } from '../types.js';
 import { Pipeline } from '../pipeline/pipeline.js';
 import { AuditLogger } from '../audit/logger.js';
 import { serveDashboard, serveDashboardAsset, serveSSE } from '../audit/dashboard.js';
@@ -10,7 +10,7 @@ import { anonymizeHeaders } from './header-anonymizer.js';
 import { log } from '../logger.js';
 
 interface ProxyServerOptions {
-  config: AInonymityConfig;
+  config: AInonymousConfig;
   upstream?: string;
   logger?: AuditLogger;
   pipeline?: Pipeline;
@@ -170,20 +170,20 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
     if (path === '/metrics') {
       const auditStats = auditLogger.stats();
       const lines = [
-        '# HELP ainonymity_uptime_seconds Proxy uptime',
-        '# TYPE ainonymity_uptime_seconds gauge',
-        `ainonymity_uptime_seconds ${((Date.now() - stats.startedAt) / 1000).toFixed(3)}`,
-        '# HELP ainonymity_requests_total API requests forwarded',
-        '# TYPE ainonymity_requests_total counter',
-        `ainonymity_requests_total ${stats.requestCount}`,
-        '# HELP ainonymity_session_map_size Current session map entries',
-        '# TYPE ainonymity_session_map_size gauge',
-        `ainonymity_session_map_size ${pipeline.getSessionMap().size}`,
-        '# HELP ainonymity_replacements_total Audit log entries by layer',
-        '# TYPE ainonymity_replacements_total counter',
-        `ainonymity_replacements_total{layer="secrets"} ${auditStats.secrets}`,
-        `ainonymity_replacements_total{layer="identity"} ${auditStats.identity}`,
-        `ainonymity_replacements_total{layer="code"} ${auditStats.code}`,
+        '# HELP ainonymous_uptime_seconds Proxy uptime',
+        '# TYPE ainonymous_uptime_seconds gauge',
+        `ainonymous_uptime_seconds ${((Date.now() - stats.startedAt) / 1000).toFixed(3)}`,
+        '# HELP ainonymous_requests_total API requests forwarded',
+        '# TYPE ainonymous_requests_total counter',
+        `ainonymous_requests_total ${stats.requestCount}`,
+        '# HELP ainonymous_session_map_size Current session map entries',
+        '# TYPE ainonymous_session_map_size gauge',
+        `ainonymous_session_map_size ${pipeline.getSessionMap().size}`,
+        '# HELP ainonymous_replacements_total Audit log entries by layer',
+        '# TYPE ainonymous_replacements_total counter',
+        `ainonymous_replacements_total{layer="secrets"} ${auditStats.secrets}`,
+        `ainonymous_replacements_total{layer="identity"} ${auditStats.identity}`,
+        `ainonymous_replacements_total{layer="code"} ${auditStats.code}`,
       ];
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       res.end(lines.join('\n') + '\n');

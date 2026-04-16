@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 import type {
-  AInonymityConfig,
+  AInonymousConfig,
   CodeConfig,
   BehaviorConfig,
   UpstreamConfig,
@@ -15,11 +15,11 @@ import { log } from '../logger.js';
 
 const CONFIG_FILENAME = '.ainonymous.yml';
 
-export function getDefaults(): AInonymityConfig {
+export function getDefaults(): AInonymousConfig {
   return structuredClone(DEFAULT_CONFIG);
 }
 
-export function loadConfig(projectDir: string): AInonymityConfig {
+export function loadConfig(projectDir: string): AInonymousConfig {
   const defaults = getDefaults();
   const configPath = join(projectDir, CONFIG_FILENAME);
 
@@ -49,7 +49,7 @@ export function loadConfig(projectDir: string): AInonymityConfig {
   return mergeConfig(defaults, parsed);
 }
 
-function mergeConfig(defaults: AInonymityConfig, raw: Record<string, unknown>): AInonymityConfig {
+function mergeConfig(defaults: AInonymousConfig, raw: Record<string, unknown>): AInonymousConfig {
   const cfg = structuredClone(defaults);
 
   if (typeof raw.version === 'number') {
