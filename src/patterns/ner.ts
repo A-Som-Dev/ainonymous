@@ -1,3 +1,6 @@
+import { splitIdentifier } from '../shared.js';
+import { normalizeForDetection, mapMatchToOriginal } from './normalize.js';
+
 export interface NameMatch {
   name: string;
   offset: number;
@@ -1384,9 +1387,15 @@ const NAME_PREFIXES = [
   /\b(?:Dr\.|Prof\.|Ing\.)\s+/g,
   /\b(?:Author|Autor|Reviewer|Maintainer|Erstellt von|Geprüft von|Bearbeiter|Ansprechpartner|Kontakt|Verantwortlich):\s*/gi,
   /\b(?:Signed-off-by|Reported-by|Reviewed-by|Co-authored-by):\s*/gi,
-  /\b(?:von|by|from)\s+(?=[A-ZÄÖÜŁŞİĞÇĆŃŹŻ])/g,
+  /\b(?:von|by|from)\s+(?=[A-ZÄÖÜŁŞİĞÇĆŃŹŻ\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}])/gu,
   /(?:@author|@since|@reviewer)\s+/gi,
 ];
+
+// Matches a run of letters from a non-latin script used for personal names.
+// CJK / Korean / Japanese: short runs (1-6 chars). Arabic / Hebrew / Cyrillic
+// / Thai / Devanagari: longer runs up to ~20 chars incl. optional spaces.
+const NON_LATIN_NAME_RE =
+  /^([\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]{2,8}|[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}][\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}\s]{1,25}[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}])/u;
 
 // Matches a capitalized word (German umlauts, Turkish ş/ı/ğ/ç, Polish ł/ą/ę/ź/ć/ń/ż/ó).
 const CAP_WORD = /[A-ZÄÖÜŁŞİĞÇĆŃŹŻ][a-zäöüßşığçłąęźćńżó]+/;
@@ -1397,6 +1406,30 @@ const FULL_NAME_RE = new RegExp(
   `(${CAP_WORD.source})(?:\\s+${CAP_WORD.source})*\\s+(?:(?:Al|El)-)?(?:${CAP_WORD.source})`,
   'g',
 );
+
+function asciify(word: string): string {
+  return word
+    .toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss');
+}
+
+const FIRST_NAMES_ASCII = new Set([...FIRST_NAMES].map(asciify));
+const LAST_NAMES_ASCII = new Set([...LAST_NAMES].map(asciify));
+
+// Common lowercase nouns from programming identifiers. Pass 3 rejects pairs
+// where a half sits here. otherwise `max_price` (Max / Price) leaks.
+const PROGRAMMING_NOUNS = new Set([
+  'avg', 'begin', 'body', 'col', 'cost', 'count', 'data', 'date', 'delta',
+  'diff', 'end', 'file', 'first', 'flag', 'form', 'hash', 'head', 'height',
+  'id', 'idx', 'index', 'int', 'item', 'key', 'kind', 'last', 'length',
+  'limit', 'line', 'list', 'max', 'mean', 'min', 'mode', 'name', 'new',
+  'num', 'offset', 'old', 'page', 'path', 'price', 'rate', 'row', 'score',
+  'size', 'start', 'state', 'stats', 'status', 'stop', 'str', 'sum', 'tax',
+  'time', 'total', 'type', 'user', 'val', 'value', 'width',
+]);
 
 function isCapitalized(word: string): boolean {
   return /^[A-ZÄÖÜŁŞĞÇĆŃŹŻİ]/.test(word);
@@ -1409,21 +1442,33 @@ function looksLikeCamelCase(text: string, offset: number): boolean {
 }
 
 function isInsideCodeBlock(text: string, offset: number): boolean {
-  // Check if surrounded by backticks or inside a code-like structure
   const before = text.slice(Math.max(0, offset - 50), offset);
   const after = text.slice(offset, Math.min(text.length, offset + 80));
 
-  // Inside backtick block
-  const btBefore = (before.match(/`/g) || []).length;
+  // Count single backticks only. A fenced block (```python ... ```) puts the
+  // name inside human-readable prose, not inside a code literal. suppressing
+  // it here caused "# Maintainer: Artur Sommer" a few lines after ```python
+  // to slip past the NER passes while "Sally Müller" further down, past the
+  // 50-char sliding window, still got caught. Strip fences before counting.
+  const withoutFences = before.replace(/```/g, '');
+  const btBefore = (withoutFences.match(/`/g) || []).length;
   if (btBefore % 2 === 1) return true;
 
-  // Looks like a class/function definition
   if (/(?:class|interface|enum|function|const|let|var|type|import|export)\s+$/.test(before))
     return true;
 
-  // Is followed by a dot, parenthesis, or angle bracket (method call / generic)
-  if (/^[.(/<]/.test(after.slice(text.slice(offset).match(CAP_WORD_RE)?.[0]?.length ?? 0)))
-    return true;
+  // Skip past the first token (latin CAP_WORD or run of non-latin letters)
+  // before checking the follow-up character. This stays consistent across
+  // scripts. CAP_WORD_RE alone would return undefined for CJK hits and miss
+  // the method-call/generic signal.
+  const latinToken = text.slice(offset).match(CAP_WORD_RE)?.[0];
+  const nonLatinToken = text
+    .slice(offset)
+    .match(
+      /^[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}\p{Script=Armenian}\p{Script=Georgian}\p{Script=Ethiopic}\p{Script=Tamil}\p{Script=Bengali}\p{Script=Gujarati}][\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Devanagari}\p{Script=Armenian}\p{Script=Georgian}\p{Script=Ethiopic}\p{Script=Tamil}\p{Script=Bengali}\p{Script=Gujarati}\s]*/u,
+    )?.[0];
+  const tokenLen = Math.max(latinToken?.length ?? 0, nonLatinToken?.length ?? 0);
+  if (/^[.(/<]/.test(after.slice(tokenLen))) return true;
 
   return false;
 }
@@ -1432,12 +1477,19 @@ function isBlocklisted(word: string): boolean {
   return BLOCKLIST.has(word);
 }
 
-function isFirstName(word: string): boolean {
-  return FIRST_NAMES.has(word) && !isBlocklisted(word);
+function isFirstName(word: string, ignoreBlocklist = false): boolean {
+  if (!ignoreBlocklist && isBlocklisted(word)) return false;
+  if (FIRST_NAMES.has(word)) return true;
+  // Allow ASCII transliterations: "Mueller" matches "Müller", "Schroeder"
+  // matches "Schröder". Covers identifier-embedded names where the source
+  // lost its umlauts on the way into the codebase.
+  return FIRST_NAMES_ASCII.has(asciify(word));
 }
 
-function isLastName(word: string): boolean {
-  return LAST_NAMES.has(word) && !isBlocklisted(word);
+function isLastName(word: string, ignoreBlocklist = false): boolean {
+  if (!ignoreBlocklist && isBlocklisted(word)) return false;
+  if (LAST_NAMES.has(word)) return true;
+  return LAST_NAMES_ASCII.has(asciify(word));
 }
 
 function hasLastNameSuffix(word: string): boolean {
@@ -1473,7 +1525,73 @@ function hasLastNameSuffix(word: string): boolean {
   return suffixes.some((s) => lower.endsWith(s) && lower.length > s.length + 1);
 }
 
-export function detectNames(text: string): NameMatch[] {
+// Standalone non-latin name detection (no prefix required). Lower confidence
+// than prefix-triggered matches. a japanese code comment or an arabic string
+// literal could trigger these. Since we pseudonymize to generic tokens, over-
+// matching is a usability tradeoff, not a data leak.
+const HAN_RUN_RE = /(?<![\p{Script=Han}])(\p{Script=Han}{2,8})(?![\p{Script=Han}])/gu;
+const HANGUL_RUN_RE = /(?<![\p{Script=Hangul}])(\p{Script=Hangul}{2,8})(?![\p{Script=Hangul}])/gu;
+const HIRAGANA_RUN_RE =
+  /(?<![\p{Script=Hiragana}])(\p{Script=Hiragana}{2,8})(?![\p{Script=Hiragana}])/gu;
+const KATAKANA_RUN_RE =
+  /(?<![\p{Script=Katakana}])(\p{Script=Katakana}{2,8})(?![\p{Script=Katakana}])/gu;
+const ARABIC_RUN_RE =
+  /(?<![\p{Script=Arabic}])(\p{Script=Arabic}[\p{Script=Arabic}\s]{2,18}\p{Script=Arabic})(?![\p{Script=Arabic}])/gu;
+const HEBREW_RUN_RE =
+  /(?<![\p{Script=Hebrew}])(\p{Script=Hebrew}[\p{Script=Hebrew}\s]{2,18}\p{Script=Hebrew})(?![\p{Script=Hebrew}])/gu;
+const CYRILLIC_RUN_RE =
+  /(?<![\p{Script=Cyrillic}])(\p{Script=Cyrillic}[\p{Script=Cyrillic}\s]{2,18}\p{Script=Cyrillic})(?![\p{Script=Cyrillic}])/gu;
+const THAI_RUN_RE =
+  /(?<![\p{Script=Thai}])(\p{Script=Thai}[\p{Script=Thai}\s]{2,18}\p{Script=Thai})(?![\p{Script=Thai}])/gu;
+const DEVANAGARI_RUN_RE =
+  /(?<![\p{Script=Devanagari}])(\p{Script=Devanagari}[\p{Script=Devanagari}\s]{2,18}\p{Script=Devanagari})(?![\p{Script=Devanagari}])/gu;
+
+export interface DetectOptions {
+  /** Skip the identifier-embedded-name scan (Pass 3). Heavy on large files;
+   *  callers can opt out when the user configured `aggression: low`. */
+  skipIdentifierScan?: boolean;
+}
+
+export function detectNames(text: string, opts?: DetectOptions): NameMatch[] {
+  // Run passes on text where zero-width injection is neutralized. Secrets-
+  // style strip (`api\u200B_key` → `api_key`) would concatenate tokens across
+  // name boundaries (`Thomas\u200BMüller` → `ThomasMüller`), so here we
+  // replace zero-width chars with a space instead. NFKC still neutralises
+  // fullwidth prefixes like `Ａｕｔｈｏｒ`.
+  const norm = normalizeForNer(text);
+  if (norm.originalPos === undefined) return detectNamesOn(text, opts);
+  const raw = detectNamesOn(norm.normalized, opts);
+  return raw.map((h) => {
+    const m = mapMatchToOriginal(norm, h.offset, h.length);
+    return { ...h, name: text.slice(m.start, m.start + m.length), offset: m.start, length: m.length };
+  });
+}
+
+const ZERO_WIDTH_NER = /[\u200B\u200C\u200D\uFEFF]/g;
+
+function normalizeForNer(original: string): ReturnType<typeof normalizeForDetection> {
+  if (!ZERO_WIDTH_NER.test(original) && original.normalize('NFKC') === original) {
+    return { normalized: original, originalPos: undefined };
+  }
+  const out: string[] = [];
+  const pos: number[] = [];
+  for (let i = 0; i < original.length; i++) {
+    const ch = original[i];
+    if (ch === '\u200B' || ch === '\u200C' || ch === '\u200D' || ch === '\uFEFF') {
+      out.push(' ');
+      pos.push(i);
+      continue;
+    }
+    const mapped = ch.normalize('NFKC');
+    for (let j = 0; j < mapped.length; j++) {
+      out.push(mapped[j]);
+      pos.push(i);
+    }
+  }
+  return { normalized: out.join(''), originalPos: pos };
+}
+
+function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
   const hits: NameMatch[] = [];
   const coveredRanges: Array<[number, number]> = [];
 
@@ -1493,20 +1611,44 @@ export function detectNames(text: string): NameMatch[] {
 
     while ((pm = re.exec(text)) !== null) {
       const afterPrefix = text.slice(pm.index + pm[0].length);
-      // Also match Arabic-style compound last names like "Al-Rahman"
       const AL_PART = `(?:(?:Al|El)-)?${CAP_WORD.source}`;
-      const nameMatch = afterPrefix.match(
+      const latinMatch = afterPrefix.match(
         new RegExp(`^(${CAP_WORD.source}(?:\\s+${AL_PART}){0,3})`),
       );
-      if (!nameMatch) continue;
 
-      const fullName = nameMatch[1];
+      let fullName: string | undefined = latinMatch?.[1];
+      if (!fullName) {
+        // Fallback for non-latin scripts after the prefix: e.g. "Author: 山田太郎"
+        // or "Kontakt: محمد الحسن". The local NER dictionaries cover German /
+        // English / Turkish / Polish / Italian / Arabic-Latin already.
+        const nonLatinMatch = afterPrefix.match(NON_LATIN_NAME_RE);
+        if (nonLatinMatch) fullName = nonLatinMatch[1].trim();
+      }
+
+      if (!fullName) continue;
+
       const words = fullName.split(/\s+/);
-
-      // At least one word must not be blocklisted
+      const originalLength = fullName.length;
       if (words.every((w) => isBlocklisted(w))) continue;
+      // Strip trailing tech terms ("Registration Service", "Hans Delta Runner"):
+      // the prefix trigger grabs the whole capitalized run, but a class/role
+      // word at the tail is noise, not part of the name.
+      const trimmed = [...words];
+      while (trimmed.length > 1 && isBlocklisted(trimmed[trimmed.length - 1])) {
+        trimmed.pop();
+      }
+      if (trimmed.every((w) => isBlocklisted(w))) continue;
+      // Require at least one token to be a recognised first/last name. Without
+      // this, "from Payment Pipeline" or "handled by the Request Storage" trip
+      // the prefix trigger and leak with 0.9 confidence despite being pure
+      // tech pairs. The BLOCKLIST alone is enumeration-fragile. too many
+      // domain nouns ("Pipeline", "Storage", "Queue", …) to keep up with.
+      const hasRecognisedName = trimmed.some(
+        (w) => isFirstName(w) || isLastName(w) || hasLastNameSuffix(w),
+      );
+      if (!hasRecognisedName) continue;
+      if (trimmed.length < words.length) fullName = trimmed.join(' ');
 
-      // Reject if it looks like code
       const nameOffset = pm.index + pm[0].length;
       if (isInsideCodeBlock(text, nameOffset)) continue;
 
@@ -1517,7 +1659,11 @@ export function detectNames(text: string): NameMatch[] {
         length: fullName.length,
         confidence,
       });
-      markCovered(nameOffset, fullName.length);
+      // Cover the ORIGINAL prefix-matched span so Pass 2 doesn't re-hit the
+      // trimmed tail with lower confidence. Otherwise "Kontakt: Hans Delta
+      // Runner" produces both "Hans@0.9" (Pass 1 trimmed) and
+      // "Hans Delta Runner@0.85" (Pass 2 full-range).
+      markCovered(nameOffset, originalLength);
     }
   }
 
@@ -1574,7 +1720,122 @@ export function detectNames(text: string): NameMatch[] {
     fullRe.lastIndex = offset + first.length + 1;
   }
 
-  // Deduplicate and sort by offset
+  // Pass 2b: strict 2-word pairs. Pass 2 greedy matched 3+ tokens and
+  // rejected the whole span when ends were unknown, so "Clemens Kurz Customer"
+  // never yielded the inner "Clemens Kurz".
+  const pairRe = new RegExp(`(${CAP_WORD.source})\\s+(${CAP_WORD.source})`, 'g');
+  let pm2: RegExpExecArray | null;
+  while ((pm2 = pairRe.exec(text)) !== null) {
+    const pairMatch = pm2[0];
+    const offset = pm2.index;
+    if (isAlreadyCovered(offset, pairMatch.length)) {
+      pairRe.lastIndex = offset + pm2[1].length + 1;
+      continue;
+    }
+    if (looksLikeCamelCase(text, offset)) {
+      pairRe.lastIndex = offset + pm2[1].length + 1;
+      continue;
+    }
+    if (isInsideCodeBlock(text, offset)) {
+      pairRe.lastIndex = offset + pm2[1].length + 1;
+      continue;
+    }
+    const first = pm2[1];
+    const last = pm2[2];
+    if (isBlocklisted(first) && isBlocklisted(last)) {
+      pairRe.lastIndex = offset + first.length + 1;
+      continue;
+    }
+    const firstOk = isFirstName(first);
+    const lastOk = isLastName(last) || hasLastNameSuffix(last);
+    let confidence: number;
+    if (firstOk && lastOk) {
+      confidence = 0.85;
+    } else if (firstOk && isCapitalized(last) && !isBlocklisted(last)) {
+      confidence = 0.7;
+    } else if (lastOk && isCapitalized(first) && !isBlocklisted(first)) {
+      confidence = 0.7;
+    } else {
+      pairRe.lastIndex = offset + first.length + 1;
+      continue;
+    }
+    hits.push({ name: pairMatch, offset, length: pairMatch.length, confidence });
+    markCovered(offset, pairMatch.length);
+    pairRe.lastIndex = offset + first.length + 1;
+  }
+
+  // Pass 3: embedded names inside camelCase / PascalCase identifiers.
+  // Always runs. the prior `skipIdentifierScan` opt-out for aggression=low
+  // let every `getHunterMuellerData` / `processArturSommerOrder` through.
+  // Ignore BLOCKLIST for Pass 3: a word like `Hunter` as part of an
+  // identifier is overwhelmingly a person, not the tech term.
+  {
+    const identifierRe = /\b[A-Za-z][A-Za-z0-9_-]{5,}[A-Za-z0-9]\b/g;
+    let im: RegExpExecArray | null;
+    while ((im = identifierRe.exec(text)) !== null) {
+      const id = im[0];
+      if (!/[a-z][A-Z]/.test(id) && !/[A-Z][a-z]+[A-Z]/.test(id) && !/[_-]/.test(id)) continue;
+
+      const parts = splitIdentifier(id);
+      if (parts.length < 2) continue;
+
+      const cap = (s: string): string => (s[0] ? s[0].toUpperCase() + s.slice(1) : s);
+      let matched = false;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const rawA = parts[i];
+        const rawB = parts[i + 1];
+        if (PROGRAMMING_NOUNS.has(rawA.toLowerCase()) || PROGRAMMING_NOUNS.has(rawB.toLowerCase())) {
+          continue;
+        }
+        const a = cap(rawA);
+        const b = cap(rawB);
+        if (
+          (isFirstName(a, true) && (isLastName(b, true) || hasLastNameSuffix(b))) ||
+          (isFirstName(b, true) && (isLastName(a, true) || hasLastNameSuffix(a)))
+        ) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) continue;
+
+      const offset = im.index;
+      if (isAlreadyCovered(offset, id.length)) continue;
+
+      hits.push({ name: id, offset, length: id.length, confidence: 0.75 });
+      markCovered(offset, id.length);
+    }
+  }
+
+  // Pass 4: standalone non-latin script runs. Confidence 0.55 because this
+  // will overmatch on foreign-language code comments, but pseudonymizing them
+  // is harmless (replacement is generic) and the alternative is leaking CJK /
+  // Korean / Arabic names that never carry a western context prefix.
+  for (const re of [
+    HAN_RUN_RE,
+    HANGUL_RUN_RE,
+    HIRAGANA_RUN_RE,
+    KATAKANA_RUN_RE,
+    ARABIC_RUN_RE,
+    HEBREW_RUN_RE,
+    CYRILLIC_RUN_RE,
+    THAI_RUN_RE,
+    DEVANAGARI_RUN_RE,
+  ]) {
+    const r = new RegExp(re.source, re.flags);
+    let m: RegExpExecArray | null;
+    while ((m = r.exec(text)) !== null) {
+      const name = m[1].trim();
+      if (!name) continue;
+      const offset = m.index + (m[1].length - name.length > 0 ? m[1].indexOf(name) : 0);
+      const len = name.length;
+      if (isAlreadyCovered(offset, len)) continue;
+      if (isInsideCodeBlock(text, offset)) continue;
+      hits.push({ name, offset, length: len, confidence: 0.55 });
+      markCovered(offset, len);
+    }
+  }
+
   hits.sort((a, b) => a.offset - b.offset);
   return hits;
 }
