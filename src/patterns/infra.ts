@@ -30,6 +30,14 @@ export const INFRA_PATTERNS: PatternRule[] = [
     regex:
       /\b[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.(?:internal|local|corp|intranet|lan|private)\b/g,
   },
+  {
+    // Strip version numbers off tech-stack brands. Brand stays (LLM still
+    // needs context), version goes (CVE / release cadence leak). Curated
+    // brand list so plain numbers like "Order 4711" don't match.
+    type: 'tech-version',
+    regex:
+      /\b(Spring Boot|Spring|Quarkus|Micronaut|Kafka|Oracle|Java|Kotlin|Scala|Python|Node(?:\.js)?|NET|Golang|Go|Rust|Ruby|Erlang|Elixir|Clojure|PHP|Perl|Camunda|Playwright|Puppeteer|Selenium|Cypress|Docker|Kubernetes|Helm|Terraform|Ansible|Puppet|Chef|Postgres(?:ql)?|MongoDB|Redis|Elasticsearch|Opensearch|Hibernate|Jackson|Lombok|React|Angular|Vue|Svelte|Nextjs|Nuxt|Nginx|Apache|Tomcat|Jetty|Netty|Maven|Gradle|Bazel|Raspberry(?:[- ]Pi)?|SQLite|MySQL|MariaDB|Cassandra|DynamoDB|Neo4j)\s+\d+(?:\.\d+)*[a-z]?\b/g,
+  },
 ];
 
 const INFRA_OR_TYPES = new Set([
@@ -43,6 +51,7 @@ const INFRA_OR_TYPES = new Set([
   'aws-arn',
   'device-uuid',
   'device-id-tag',
+  'tech-version',
 ]);
 
 function isInfraType(type: string): boolean {
