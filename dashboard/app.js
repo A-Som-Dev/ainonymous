@@ -68,7 +68,14 @@
   }
 
   function connect() {
-    var source = new EventSource('/events');
+    // If the dashboard was opened with ?token=X, propagate it to the SSE
+    // subscription so auth works without a custom Authorization header
+    // (EventSource doesn't allow headers). The server accepts ?token= as
+    // an auth source since v1.2.0 B6.
+    var params = new URLSearchParams(window.location.search);
+    var token = params.get('token');
+    var eventsUrl = token ? '/events?token=' + encodeURIComponent(token) : '/events';
+    var source = new EventSource(eventsUrl);
 
     source.addEventListener('stats', function (e) {
       updateStats(JSON.parse(e.data));

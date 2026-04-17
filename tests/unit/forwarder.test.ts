@@ -200,7 +200,7 @@ describe('forwardWithRehydration', () => {
 
   it('times out slow upstream requests', async () => {
     upstream = http.createServer((_req, _res) => {
-      // never respond — let the timeout fire
+      // never respond. let the timeout fire
     });
 
     await new Promise<void>((r) => upstream!.listen(0, '127.0.0.1', r));

@@ -103,6 +103,7 @@ export function broadcastStats(stats: {
   secrets: number;
   identity: number;
   code: number;
+  rehydrated?: number;
   total: number;
 }): void {
   for (let i = clients.length - 1; i >= 0; i--) {

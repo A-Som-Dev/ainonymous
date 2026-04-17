@@ -207,7 +207,7 @@ describe('E2E proxy flow', () => {
     expect(body).toContain('***REDACTED***');
     expect(body).not.toContain('hunter2secretpass');
 
-    // upstream-facing anonymization — the actual identity protection contract
+    // upstream-facing anonymization. the actual identity protection contract
     expect(capturedUpstreamBody).not.toContain('Artur Sommer');
     expect(capturedUpstreamBody).not.toContain('Acme Corp');
     expect(capturedUpstreamBody).not.toContain('hunter2secretpass');

@@ -8,6 +8,12 @@ export interface ParsedRequest {
   body: unknown;
 }
 
+// Inference-control fields whose string content is constant (model ID, enum
+// mode, seed material). Leaving these alone keeps the LLM routing untouched.
+// Fields that may legitimately carry user text (stop_sequences, tools,
+// response_format.schema) are NOT in this set. they flow through the pipeline
+// so PII embedded in tool descriptions, stop markers and JSON schemas gets
+// pseudonymised consistently with the rest of the payload.
 const SCALAR_FIELDS = new Set([
   // shared
   'model',
@@ -17,16 +23,12 @@ const SCALAR_FIELDS = new Set([
   'top_p',
   // anthropic-specific
   'top_k',
-  'stop_sequences',
   // openai-specific
   'n',
-  'stop',
   'presence_penalty',
   'frequency_penalty',
   'logit_bias',
-  'response_format',
   'seed',
-  'tools',
   'tool_choice',
 ]);
 
@@ -108,7 +110,8 @@ async function deepReplace(
   if (Array.isArray(node)) {
     const mapped: unknown[] = [];
     for (const item of node) {
-      mapped.push(await deepReplace(item, replaceFn, parentKey));
+      const inheritKey = typeof item === 'string' ? parentKey : undefined;
+      mapped.push(await deepReplace(item, replaceFn, inheritKey));
     }
     return mapped;
   }

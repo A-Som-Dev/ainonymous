@@ -40,9 +40,23 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 
 function extractBearerToken(req: http.IncomingMessage): string | null {
   const h = req.headers['authorization'];
-  if (typeof h !== 'string') return null;
-  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
-  return m ? m[1].trim() : null;
+  if (typeof h === 'string') {
+    const m = /^Bearer\s+(.+)$/i.exec(h.trim());
+    if (m) return m[1].trim();
+  }
+  // Dashboard runs in a browser. a static HTML page can't set an
+  // Authorization header on SSE (EventSource) or navigation requests, so we
+  // also accept the token as a `?token=...` query param. Safe because the
+  // server only listens on loopback by default and the token is 32 bytes
+  // of random hex.
+  const url = req.url ?? '';
+  const q = url.indexOf('?');
+  if (q >= 0) {
+    const params = new URLSearchParams(url.slice(q + 1));
+    const t = params.get('token');
+    if (t) return t;
+  }
+  return null;
 }
 
 function requireMgmtAuth(
@@ -120,8 +134,14 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
       const format = detectApiFormat(parsed.body, path);
       const upstream = pickUpstream(format);
 
+      // Track every pseudonym actually emitted while anonymising this
+      // request. The rehydrate pass is then restricted to exactly that set,
+      // so a malicious upstream cannot echo unrelated pseudos back to probe
+      // the session map (RT-Oracle attack).
+      const usedPseudos = new Set<string>();
       const anonymizedBody = await replaceTextInJson(parsed.body, async (text) => {
         const result = await pipeline.anonymize(text);
+        for (const r of result.replacements) usedPseudos.add(r.pseudonym);
         return result.text;
       });
 
@@ -140,7 +160,7 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
           maxPseudoLen: pipeline.getSessionMap().getMaxPseudonymLength(),
         },
         res,
-        (chunk) => pipeline.rehydrate(chunk),
+        (chunk) => pipeline.rehydrate(chunk, { allowedPseudonyms: usedPseudos }),
       );
     } catch (err) {
       log.error('proxy request failed', {
@@ -191,6 +211,7 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
         `ainonymous_replacements_total{layer="secrets"} ${auditStats.secrets}`,
         `ainonymous_replacements_total{layer="identity"} ${auditStats.identity}`,
         `ainonymous_replacements_total{layer="code"} ${auditStats.code}`,
+        `ainonymous_replacements_total{layer="rehydration"} ${auditStats.rehydrated}`,
       ];
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       res.end(lines.join('\n') + '\n');

@@ -25,12 +25,26 @@ export interface ForwardOptions {
   maxPseudoLen?: number;
 }
 
+function isLocalHost(host: string): boolean {
+  const bare = host.split(':')[0];
+  return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+}
+
 export function forwardWithRehydration(
   opts: ForwardOptions,
   clientRes: ServerResponse,
   rehydrateFn: (chunk: string) => string,
 ): void {
   const url = new URL(opts.path, opts.upstream);
+  if (url.protocol !== 'https:' && !isLocalHost(url.hostname)) {
+    // Defence in depth: even if someone hand-edits behavior.upstream.* to an
+    // http:// URL (bypassing validate.ts) the forwarder itself refuses to
+    // send the API key over plain HTTP. Localhost targets stay allowed for
+    // test fixtures and local inference gateways.
+    throw new Error(
+      `forwarder refuses plain-http upstream ${url.host}. API credentials would be exposed. Use https:// or a localhost target.`,
+    );
+  }
   const transport = url.protocol === 'https:' ? https : http;
 
   const fwdHeaders: Record<string, string | string[]> = {};
