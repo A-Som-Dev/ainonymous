@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { writeFileSync, appendFileSync, mkdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AuditEntry, Replacement, LayerName } from '../types.js';
+import type { AuditEntry, Replacement, AuditLayer } from '../types.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -50,20 +50,50 @@ export class AuditLogger {
     for (const r of replacements) this.log(r);
   }
 
+  /** Record which pseudonyms the rehydrator actually swapped back into the
+   *  response. `audit pending` diffs anonymize-originals against these to show
+   *  session-map entries the LLM never referenced. */
+  logRehydration(
+    entries: Array<Pick<Replacement, 'original' | 'pseudonym' | 'layer' | 'type'>>,
+  ): void {
+    for (const e of entries) {
+      const base: Omit<AuditEntry, 'prevHash'> = {
+        timestamp: Date.now(),
+        layer: 'rehydration',
+        type: e.type,
+        originalHash: hashTruncated(e.original),
+        context: `rehydrated:${e.layer}/${e.type}`,
+        seq: this.seq++,
+      };
+      const entry: AuditEntry = { ...base, prevHash: this.lastHash };
+      this.lastHash = chainHash(this.lastHash, base);
+      this.records.push(entry);
+      this.persistEntry(entry);
+    }
+  }
+
   entries(): AuditEntry[] {
     return [...this.records];
   }
 
-  stats(): { secrets: number; identity: number; code: number; total: number } {
+  stats(): {
+    secrets: number;
+    identity: number;
+    code: number;
+    rehydrated: number;
+    total: number;
+  } {
     let secrets = 0;
     let identity = 0;
     let code = 0;
+    let rehydrated = 0;
     for (const entry of this.records) {
       if (entry.layer === 'secrets') secrets++;
       else if (entry.layer === 'identity') identity++;
       else if (entry.layer === 'code') code++;
+      else if (entry.layer === 'rehydration') rehydrated++;
     }
-    return { secrets, identity, code, total: this.records.length };
+    return { secrets, identity, code, rehydrated, total: this.records.length };
   }
 
   clear(): void {
@@ -81,7 +111,7 @@ export class AuditLogger {
     this.persistDir = dir;
   }
 
-  query(opts: { from?: number; to?: number; layer?: LayerName; type?: string }): AuditEntry[] {
+  query(opts: { from?: number; to?: number; layer?: AuditLayer; type?: string }): AuditEntry[] {
     return this.records.filter((e) => {
       if (opts.from !== undefined && e.timestamp < opts.from) return false;
       if (opts.to !== undefined && e.timestamp > opts.to) return false;
@@ -95,6 +125,14 @@ export class AuditLogger {
     if (!this.persistDir) return;
     const filepath = this.currentFile();
     appendFileSync(filepath, JSON.stringify(entry) + '\n', 'utf-8');
+    // Sidecar checkpoint. verifyAuditChain uses it to detect tail-truncation:
+    // the hash chain alone stays internally consistent after any suffix is cut.
+    const ckpt = filepath + '.checkpoint';
+    writeFileSync(
+      ckpt,
+      JSON.stringify({ lastSeq: entry.seq, lastHash: this.lastHash }),
+      'utf-8',
+    );
   }
 
   private currentFile(): string {
@@ -118,9 +156,14 @@ export class AuditLogger {
  * empty prevHash) after a prior session is treated as a valid restart, not
  * tampering - AuditLogger resets its state on clear() and on new-instance.
  */
-export function verifyAuditChain(lines: string[]): number | null {
+export function verifyAuditChain(
+  lines: string[],
+  expected?: { lastSeq: number; lastHash: string } | 'required',
+): number | null {
   let prev = '';
   let expectedSeq = 0;
+  let actualLastSeq = -1;
+  let actualLastHash = '';
   for (const line of lines) {
     if (!line.trim()) continue;
     let entry: AuditEntry;
@@ -129,7 +172,6 @@ export function verifyAuditChain(lines: string[]): number | null {
     } catch {
       return expectedSeq;
     }
-    // session boundary: a fresh logger starts with seq=0 and empty prevHash
     if (entry.seq === 0 && entry.prevHash === '' && expectedSeq !== 0) {
       prev = '';
       expectedSeq = 0;
@@ -138,7 +180,20 @@ export function verifyAuditChain(lines: string[]): number | null {
     if (entry.prevHash !== prev) return entry.seq ?? expectedSeq;
     const { prevHash: _prev, ...base } = entry;
     prev = chainHash(prev, base);
+    actualLastSeq = entry.seq;
+    actualLastHash = prev;
     expectedSeq++;
+  }
+  // Callers that ran the logger with persistence on MUST pass the sidecar
+  // checkpoint. Without it, an attacker who can delete both the last N
+  // JSONL lines AND the `.checkpoint` file ends up with an internally
+  // consistent (but truncated) chain that would verify silently. Treat a
+  // missing checkpoint as a tamper event under required-mode.
+  if (expected === 'required') return actualLastSeq < 0 ? 0 : actualLastSeq + 1;
+  if (expected && typeof expected === 'object') {
+    if (actualLastSeq !== expected.lastSeq || actualLastHash !== expected.lastHash) {
+      return actualLastSeq + 1;
+    }
   }
   return null;
 }

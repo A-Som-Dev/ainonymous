@@ -315,6 +315,68 @@ describe('AuditLogger query', () => {
   });
 });
 
+describe('AuditLogger rehydration tracking', () => {
+  let logger: AuditLogger;
+
+  beforeEach(() => {
+    logger = new AuditLogger();
+  });
+
+  it('records rehydration entries with layer rehydration', () => {
+    logger.logRehydration([
+      { original: 'acme.de', pseudonym: 'alpha.de', layer: 'identity', type: 'domain' },
+    ]);
+    const entries = logger.entries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].layer).toBe('rehydration');
+    expect(entries[0].type).toBe('domain');
+    expect(entries[0].context).toContain('rehydrated:');
+  });
+
+  it('hashes originals on rehydration entries', () => {
+    logger.logRehydration([
+      { original: 'acme.de', pseudonym: 'alpha.de', layer: 'identity', type: 'domain' },
+    ]);
+    const entry = logger.entries()[0];
+    expect(entry.originalHash).not.toContain('acme');
+    expect(entry.originalHash).toHaveLength(32);
+  });
+
+  it('counts rehydrated in stats separately from code/identity/secrets', () => {
+    logger.log({
+      original: 'foo',
+      pseudonym: 'Alpha',
+      layer: 'code',
+      type: 'identifier',
+      offset: 0,
+      length: 3,
+    });
+    logger.logRehydration([
+      { original: 'foo', pseudonym: 'Alpha', layer: 'code', type: 'identifier' },
+    ]);
+    const s = logger.stats();
+    expect(s.code).toBe(1);
+    expect(s.rehydrated).toBe(1);
+    expect(s.total).toBe(2);
+  });
+
+  it('continues the hash chain across rehydration entries', () => {
+    logger.log({
+      original: 'a',
+      pseudonym: 'x',
+      layer: 'code',
+      type: 'identifier',
+      offset: 0,
+      length: 1,
+    });
+    logger.logRehydration([{ original: 'a', pseudonym: 'x', layer: 'code', type: 'identifier' }]);
+    const entries = logger.entries();
+    expect(entries[0].seq).toBe(0);
+    expect(entries[1].seq).toBe(1);
+    expect(entries[1].prevHash).toHaveLength(64);
+  });
+});
+
 describe('AuditLogger hash chain', () => {
   let logger: AuditLogger;
   let tmpDir: string;
