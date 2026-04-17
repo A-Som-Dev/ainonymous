@@ -53,34 +53,27 @@ export class IdentityLayer implements Layer {
     let result = text;
     const replacements: Replacement[] = [];
 
-    if (identity.company) {
-      result = this.replaceAll(
-        result,
-        identity.company,
-        () => this.resolve(identity.company, 'company', ctx),
-        'company',
-        replacements,
-      );
+    // Longest token first. Company-before-domain would substring-match the
+    // company inside the domain, leaving a half-replaced email as the
+    // session-map key and blocking cascade rehydration.
+    type Entry = { value: string; kind: 'company' | 'domain' | 'person'; variants: string[] };
+    const entries: Entry[] = [];
+    if (identity.company) entries.push({ value: identity.company, kind: 'company', variants: [identity.company] });
+    for (const d of identity.domains) entries.push({ value: d, kind: 'domain', variants: [d] });
+    for (const p of identity.people) {
+      const tokens = p.trim().split(/\s+/);
+      const variants = new Set<string>([p]);
+      if (tokens.length === 2) variants.add(`${tokens[1]} ${tokens[0]}`);
+      entries.push({ value: p, kind: 'person', variants: [...variants] });
     }
+    entries.sort((a, b) => b.value.length - a.value.length);
 
-    for (const domain of identity.domains) {
-      result = this.replaceAll(
-        result,
-        domain,
-        () => this.resolve(domain, 'domain', ctx),
-        'domain',
-        replacements,
-      );
-    }
-
-    for (const person of identity.people) {
-      result = this.replaceAll(
-        result,
-        person,
-        () => this.resolve(person, 'person', ctx),
-        'person',
-        replacements,
-      );
+    for (const entry of entries) {
+      let pseudo: string | undefined;
+      const once = () => (pseudo ??= this.resolve(entry.value, entry.kind, ctx));
+      for (const variant of entry.variants) {
+        result = this.replaceAll(result, variant, once, entry.kind, replacements);
+      }
     }
 
     return { text: result, replacements };
@@ -123,23 +116,31 @@ export class IdentityLayer implements Layer {
     replacements: Replacement[],
     ctx: PipelineContext,
   ): AnonymizeResult {
+    // Pass 3 (identifier-embedded names) always runs now. aggression=low used
+    // to skip it, which leaked `getHunterMuellerData` verbatim.
     const nameHits = detectNames(text);
     if (nameHits.length === 0) return { text, replacements };
 
     let result = text;
 
-    // Filter out names that overlap with already-replaced ranges
-    const replacedRanges = replacements
-      .filter((r) => r.layer === 'identity')
-      .map((r) => [r.offset, r.offset + r.length] as [number, number]);
+    // Drop hits that already are a known pseudonym (would double-rewrite).
+    // The prior offset overlap against `replacements` was wrong: those offsets
+    // are from pre-replacement text while NER runs on post-replacement text.
+    const candidates = nameHits.filter((hit) => !ctx.sessionMap.getByPseudonym(hit.name));
+    if (candidates.length === 0) return { text, replacements };
 
-    const fresh = nameHits.filter((hit) => {
-      return !replacedRanges.some(([s, e]) => hit.offset < e && hit.offset + hit.length > s);
-    });
+    // Dedup overlapping NER hits themselves (Pass 2b can yield "Clemens Kurz"
+    // + "Kurz Peter" on the same text. without this the reverse-offset
+    // slice/replace below would corrupt indices).
+    const byOffset = [...candidates].sort((a, b) => a.offset - b.offset);
+    const fresh: typeof candidates = [];
+    let lastEnd = -1;
+    for (const hit of byOffset) {
+      if (hit.offset < lastEnd) continue;
+      fresh.push(hit);
+      lastEnd = hit.offset + hit.length;
+    }
 
-    if (fresh.length === 0) return { text, replacements };
-
-    // Apply in reverse offset order to preserve positions
     const sorted = [...fresh].sort((a, b) => b.offset - a.offset);
 
     for (const hit of sorted) {
@@ -191,6 +192,15 @@ export class IdentityLayer implements Layer {
   private pseudoFor(hit: PatternMatch, ctx: PipelineContext): string | null {
     const existing = ctx.sessionMap.getByOriginal(hit.match);
     if (existing) return existing;
+
+    // The match may already contain an earlier pseudonym (domain rewritten
+    // before the full URL was detected). Resolve back first, otherwise we
+    // allocate a duplicate pseudo and rehydrate goes lossy.
+    const trueEarly = this.resolveToTrueOriginal(hit.match, ctx);
+    if (trueEarly !== hit.match) {
+      const aliased = ctx.sessionMap.getByOriginal(trueEarly);
+      if (aliased) return aliased;
+    }
 
     let pseudo: string;
 
@@ -247,13 +257,47 @@ export class IdentityLayer implements Layer {
       case 'ipv6':
         pseudo = '::1';
         break;
+      case 'ticket-jira': {
+        // Keep the shape `PREFIX-N` but anonymize both parts. The LLM can
+        // still tell it's a ticket reference, just not which one.
+        pseudo = 'TICKET-' + String(ctx.sessionMap.size + 1).padStart(4, '0');
+        break;
+      }
+      case 'ticket-hash':
+        pseudo = '#' + String(ctx.sessionMap.size + 1).padStart(4, '0');
+        break;
+      case 'tech-version': {
+        // Keep the brand, drop the version. `Spring Boot 3.2` becomes
+        // `Spring Boot`. The LLM still knows the stack, the attacker doesn't
+        // know the minor/patch for CVE targeting.
+        const parts = trueEarly.split(/\s+/);
+        // Drop the last whitespace-delimited token if it looks like a version.
+        if (parts.length >= 2 && /^\d+(?:\.\d+)*[a-z]?$/.test(parts[parts.length - 1])) {
+          pseudo = parts.slice(0, -1).join(' ');
+        } else {
+          pseudo = trueEarly;
+        }
+        break;
+      }
       default:
         pseudo = '***ANONYMIZED***';
         break;
     }
 
-    ctx.sessionMap.set(hit.match, pseudo, 'identity', hit.type);
+    ctx.sessionMap.set(trueEarly, pseudo, 'identity', hit.type);
     return pseudo;
+  }
+
+  // Cascade a half-replaced match back through the session map so the key we
+  // store is the true pre-pipeline original, not the already-partially-
+  // anonymised intermediate.
+  private resolveToTrueOriginal(semi: string, ctx: PipelineContext): string {
+    let out = semi;
+    for (const [orig, pseudo] of ctx.sessionMap.entries()) {
+      if (orig === semi) continue;
+      if (out.includes(pseudo)) out = out.split(pseudo).join(orig);
+    }
+    return out;
   }
 
   private replaceAll(

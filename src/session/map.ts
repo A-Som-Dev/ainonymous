@@ -51,6 +51,21 @@ export class BiMap implements SessionMap {
     const hash = this.hash(original);
     if (this.fwd.has(hash)) return;
 
+    // Pseudonym collision: PseudoGen cycles (Greek/two-letter) mean two
+    // separate originals can land on the same pseudonym after enough
+    // entries. particularly across processes sharing a persisted DB.
+    // Without a guard the second insert quietly overwrites the reverse map
+    // and rehydration returns the wrong original for the winner pseudonym.
+    if (this.rev.has(pseudonym)) {
+      const existing = this.decrypt(this.rev.get(pseudonym)!);
+      if (existing !== original) {
+        throw new Error(
+          `session-map pseudonym collision: "${pseudonym}" already maps to a different original. ` +
+            `Restart the proxy or rotate the session key to reset the generator.`,
+        );
+      }
+    }
+
     const createdAt = Date.now();
     this.fwd.set(hash, pseudonym);
     this.rev.set(pseudonym, this.encrypt(original));
@@ -148,6 +163,14 @@ export class BiMap implements SessionMap {
     if (!this.store) return;
     for (const row of this.store.loadAll(this.key)) {
       const h = this.hash(row.original);
+      // Mirror set()'s collision guard: two writers with overlapping pseudo
+      // counters against the same persisted DB could otherwise race and the
+      // reverse map would point at whichever row loaded last.
+      if (this.rev.has(row.pseudonym)) {
+        const existingEnc = this.rev.get(row.pseudonym)!;
+        const existing = this.decrypt(existingEnc);
+        if (existing !== row.original) continue;
+      }
       this.fwd.set(h, row.pseudonym);
       this.rev.set(row.pseudonym, this.encrypt(row.original));
       this.meta.set(h, { layer: 'identity', type: 'restored', createdAt: row.createdAt });

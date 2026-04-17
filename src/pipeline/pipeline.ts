@@ -71,9 +71,14 @@ export class Pipeline {
     return { text: r3.text, replacements: allReplacements };
   }
 
-  rehydrate(text: string): string {
+  rehydrate(text: string, opts?: { allowedPseudonyms?: Set<string> }): string {
+    // Oracle-attack defense: when the caller knows which pseudonyms it sent,
+    // rehydrate only those. Blocks a malicious upstream from probing the
+    // session map by echoing arbitrary pseudos in its response.
+    const allowed = opts?.allowedPseudonyms;
     const entries = [...this.sessionMap.entries()]
       .filter(([, pseudo]) => pseudo !== '***REDACTED***')
+      .filter(([, pseudo]) => !allowed || allowed.has(pseudo))
       .sort((a, b) => b[1].length - a[1].length);
 
     if (entries.length === 0) return text;
@@ -90,6 +95,7 @@ export class Pipeline {
     let changed = true;
     let iterations = 0;
     const MAX_ITER = 10;
+    const rehydrated = new Set<string>();
 
     while (changed && iterations < MAX_ITER) {
       iterations++;
@@ -107,7 +113,15 @@ export class Pipeline {
       for (const [original, pseudonym] of entries) {
         if (!result.includes(pseudonym)) continue;
         const escaped = escapeRegex(pseudonym);
-        const re = new RegExp(escaped, 'g');
+        // Short pseudos like Eta/Rho must not rewrite words that contain them
+        // (Theta, Rhombus). Word boundary on the left, lowercase-lookahead
+        // on the right still lets PascalCase compounds rehydrate.
+        const startsAlphaNum = /^[A-Za-z0-9_]/.test(pseudonym);
+        const endsAlphaNum = /[A-Za-z0-9]$/.test(pseudonym);
+        const leftBoundary = startsAlphaNum ? '\\b' : '';
+        const rightBoundary = endsAlphaNum ? '(?![a-z0-9])' : '';
+        const boundedPattern = leftBoundary + escaped + rightBoundary;
+        const re = new RegExp(boundedPattern, 'g');
         let m: RegExpExecArray | null;
         while ((m = re.exec(result)) !== null) {
           const start = m.index;
@@ -130,9 +144,24 @@ export class Pipeline {
       for (let i = kept.length - 1; i >= 0; i--) {
         const h = kept[i];
         result = result.slice(0, h.start) + h.replacement + result.slice(h.end);
+        rehydrated.add(h.replacement);
       }
 
       changed = kept.length > 0;
+    }
+
+    if (this.logger && rehydrated.size > 0) {
+      const pseudoByOrig = new Map(entries);
+      const records = [...rehydrated].map((orig) => {
+        const meta = this.sessionMap.getMeta(orig);
+        return {
+          original: orig,
+          pseudonym: pseudoByOrig.get(orig) ?? '',
+          layer: meta?.layer ?? ('code' as const),
+          type: meta?.type ?? 'pseudonym',
+        };
+      });
+      this.logger.logRehydration(records);
     }
 
     return result;

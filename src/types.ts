@@ -1,5 +1,9 @@
 export type LayerName = 'secrets' | 'identity' | 'code';
 
+/** Audit-log entries widen LayerName with 'rehydration' for post-response tracking.
+ *  SessionMap.set() still uses LayerName - rehydration is a log-only concern. */
+export type AuditLayer = LayerName | 'rehydration';
+
 export interface Replacement {
   original: string;
   pseudonym: string;
@@ -87,6 +91,8 @@ export interface UpstreamConfig {
   openai: string;
 }
 
+export type AggressionMode = 'low' | 'medium' | 'high';
+
 export interface BehaviorConfig {
   interactive: boolean;
   auditLog: boolean;
@@ -98,11 +104,16 @@ export interface BehaviorConfig {
   /** Bearer token required for management endpoints (/metrics, /dashboard, /events).
    *  Unset leaves them open for backwards-compat. Env AINONYMOUS_MGMT_TOKEN overrides this. */
   mgmtToken?: string;
+  /** How aggressively the code layer pseudonymizes identifiers.
+   *  - low: only explicit identity/domain_terms, no AST identifier pseudonymization
+   *  - medium (default): low + compound identifiers that contain a domain_term substring
+   *  - high: all AST identifiers not in preserve */
+  aggression: AggressionMode;
 }
 
 export interface AuditEntry {
   timestamp: number;
-  layer: LayerName;
+  layer: AuditLayer;
   type: string;
   originalHash: string;
   context: string;
