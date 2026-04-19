@@ -22,7 +22,7 @@ export function registerDoctorCmd(program: Command): void {
       const checks: Check[] = [];
       checks.push(checkNodeVersion());
       checks.push(checkConfigFile(opts.dir));
-      checks.push(checkConfigIdentity(opts.dir));
+      checks.push(...checkConfigIdentity(opts.dir));
       checks.push(await checkPort(resolvePort(opts.dir), host));
       checks.push(checkEnvUpstream());
 
@@ -88,30 +88,45 @@ function checkConfigFile(dir: string): Check {
   }
 }
 
-function checkConfigIdentity(dir: string): Check {
+function checkConfigIdentity(dir: string): Check[] {
   const p = join(dir, '.ainonymous.yml');
-  if (!existsSync(p))
-    return { label: 'identity coverage', status: 'warn', detail: 'no config yet' };
+  if (!existsSync(p)) {
+    return [{ label: 'identity coverage', status: 'warn', detail: 'no config yet' }];
+  }
   try {
     const raw = yaml.load(readFileSync(p, 'utf-8')) as Record<string, unknown>;
     const identity = (raw?.identity ?? {}) as Record<string, unknown>;
     const company = typeof identity.company === 'string' ? identity.company : '';
     const domains = Array.isArray(identity.domains) ? identity.domains : [];
     const people = Array.isArray(identity.people) ? identity.people : [];
-    if (!company && domains.length === 0 && people.length === 0) {
-      return {
-        label: 'identity coverage',
-        status: 'warn',
-        detail: 'all of company/domains/people empty. PII will likely leak',
-      };
-    }
-    return {
-      label: 'identity coverage',
-      status: 'ok',
-      detail: `company=${company || '(none)'} domains=${domains.length} people=${people.length}`,
-    };
+
+    const fields: Check[] = [];
+    fields.push(
+      company
+        ? { label: 'identity.company', status: 'ok', detail: company }
+        : { label: 'identity.company', status: 'warn', detail: 'empty. company names will leak' },
+    );
+    fields.push(
+      domains.length > 0
+        ? { label: 'identity.domains', status: 'ok', detail: `${domains.length} configured` }
+        : {
+            label: 'identity.domains',
+            status: 'warn',
+            detail: 'empty. internal hostnames and emails will leak',
+          },
+    );
+    fields.push(
+      people.length > 0
+        ? { label: 'identity.people', status: 'ok', detail: `${people.length} configured` }
+        : {
+            label: 'identity.people',
+            status: 'warn',
+            detail: 'empty. author/reviewer names will leak',
+          },
+    );
+    return fields;
   } catch {
-    return { label: 'identity coverage', status: 'warn', detail: 'unreadable' };
+    return [{ label: 'identity coverage', status: 'warn', detail: 'unreadable' }];
   }
 }
 

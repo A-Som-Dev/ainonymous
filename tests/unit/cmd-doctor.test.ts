@@ -37,14 +37,28 @@ describe('doctor', () => {
     expect(stdout).toMatch(/missing/);
   });
 
-  it('warns on empty identity coverage', () => {
+  it('warns on empty identity coverage per field', () => {
     writeFileSync(
       join(workdir, '.ainonymous.yml'),
       'identity:\n  company: ""\n  domains: []\n  people: []\n',
       'utf-8',
     );
     const { stdout } = runDoctor(workdir);
-    expect(stdout).toMatch(/PII will likely leak/);
+    expect(stdout).toMatch(/identity\.company.*empty/);
+    expect(stdout).toMatch(/identity\.domains.*empty/);
+    expect(stdout).toMatch(/identity\.people.*empty/);
+  });
+
+  it('warns only for missing field when some are populated', () => {
+    writeFileSync(
+      join(workdir, '.ainonymous.yml'),
+      'identity:\n  company: acme\n  domains:\n    - acme.de\n  people: []\n',
+      'utf-8',
+    );
+    const { stdout } = runDoctor(workdir);
+    expect(stdout).toMatch(/identity\.people.*empty/);
+    expect(stdout).not.toMatch(/identity\.company.*empty/);
+    expect(stdout).not.toMatch(/identity\.domains.*empty/);
   });
 
   it('exits 1 under --strict when there are warnings', () => {
@@ -64,7 +78,8 @@ describe('doctor', () => {
       'utf-8',
     );
     const { stdout } = runDoctor(workdir);
-    expect(stdout).toContain('identity coverage');
-    expect(stdout).toMatch(/company=acme/);
+    expect(stdout).toMatch(/identity\.company.*acme/);
+    expect(stdout).toMatch(/identity\.domains.*1 configured/);
+    expect(stdout).toMatch(/identity\.people.*1 configured/);
   });
 });
