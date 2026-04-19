@@ -30,8 +30,38 @@ export interface ValidationIssue {
   severity: 'error' | 'warning';
 }
 
+function findCycle(value: unknown, seen: WeakSet<object>, path: string): string | null {
+  if (value === null || typeof value !== 'object') return null;
+  if (seen.has(value as object)) return path || '<root>';
+  seen.add(value as object);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = findCycle(value[i], seen, `${path}[${i}]`);
+      if (hit) return hit;
+    }
+  } else {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const hit = findCycle(v, seen, path ? `${path}.${k}` : k);
+      if (hit) return hit;
+    }
+  }
+  seen.delete(value as object);
+  return null;
+}
+
 export function validateRawConfig(raw: Record<string, unknown>): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+
+  const cyclePath = findCycle(raw, new WeakSet(), '');
+  if (cyclePath) {
+    issues.push({
+      path: cyclePath,
+      message:
+        'config contains a self-reference (YAML anchor cycle). resolve the anchor or remove the reference.',
+      severity: 'error',
+    });
+    return issues;
+  }
 
   for (const key of Object.keys(raw)) {
     if (!KNOWN_TOP_KEYS.has(key)) {
