@@ -1,6 +1,6 @@
 {
   "name": "ainonymous",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local proxy that anonymizes sensitive data before it reaches LLM APIs",
   "type": "module",
   "main": "dist/index.js",
