@@ -775,7 +775,7 @@ describe('QA: GEFUNDENE BUGS - Dokumentation', () => {
 
     const taxResult = await pipeline.anonymize('Steuer-Nr: 12/345/67890');
     expect(taxResult.text).not.toContain('12/345/67890');
-    expect(taxResult.text).toContain('00/000/00000');
+    expect(taxResult.text).toMatch(/\d{2}\/\d{3}\/\d{5}/);
   });
 
   it('BUG #7: OpenAI sk-proj-* Keys werden jetzt erkannt', () => {

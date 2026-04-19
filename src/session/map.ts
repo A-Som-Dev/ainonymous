@@ -24,6 +24,11 @@ export interface BiMapOptions {
 }
 
 const ALGO = 'aes-256-gcm';
+const SENTINELS = new Set(['***ANONYMIZED***', '***REDACTED***']);
+
+export function isSentinel(pseudonym: string): boolean {
+  return SENTINELS.has(pseudonym);
+}
 
 export class BiMap implements SessionMap {
   private fwd = new Map<string, string>();
@@ -51,12 +56,9 @@ export class BiMap implements SessionMap {
     const hash = this.hash(original);
     if (this.fwd.has(hash)) return;
 
-    // Pseudonym collision: PseudoGen cycles (Greek/two-letter) mean two
-    // separate originals can land on the same pseudonym after enough
-    // entries. particularly across processes sharing a persisted DB.
-    // Without a guard the second insert quietly overwrites the reverse map
-    // and rehydration returns the wrong original for the winner pseudonym.
-    if (this.rev.has(pseudonym)) {
+    const sentinel = isSentinel(pseudonym);
+
+    if (!sentinel && this.rev.has(pseudonym)) {
       const existing = this.decrypt(this.rev.get(pseudonym)!);
       if (existing !== original) {
         throw new Error(
@@ -68,11 +70,13 @@ export class BiMap implements SessionMap {
 
     const createdAt = Date.now();
     this.fwd.set(hash, pseudonym);
-    this.rev.set(pseudonym, this.encrypt(original));
+    if (!sentinel) {
+      this.rev.set(pseudonym, this.encrypt(original));
+    }
     this.meta.set(hash, { layer, type, createdAt });
     this.decryptedCache = null;
 
-    if (this.store) {
+    if (this.store && !sentinel) {
       this.store.insert(original, pseudonym, this.key, createdAt);
     }
   }

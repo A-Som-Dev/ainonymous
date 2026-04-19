@@ -213,50 +213,48 @@ export class IdentityLayer implements Layer {
         pseudo = this.gen.ipv4(hit.match);
         break;
       case 'phone':
-        pseudo = '+49 30 000-' + String(ctx.sessionMap.size + 1).padStart(4, '0');
+        pseudo = this.gen.phone(hit.match);
         break;
       case 'iban':
-        pseudo = 'DE00 0000 0000 0000 0000 ' + String(ctx.sessionMap.size + 1).padStart(2, '0');
+        pseudo = this.gen.iban(hit.match);
         break;
       case 'hostname-internal':
       case 'internal-url':
         pseudo = this.gen.domain(hit.match);
         break;
-      case 'credit-card': {
-        const suffix = String(ctx.sessionMap.size + 1).padStart(4, '0');
-        pseudo = `****-****-****-${suffix}`;
+      case 'credit-card':
+        pseudo = this.gen.creditCard(hit.match);
         break;
-      }
       case 'address':
-        pseudo = `Beispielweg ${ctx.sessionMap.size + 1}, 10000 Berlin`;
+        pseudo = this.gen.address(hit.match);
         break;
       case 'tax-id':
-        pseudo = '00/000/00000';
+        pseudo = this.gen.taxId(hit.match);
         break;
       case 'sozialversicherung':
-        pseudo = '00 000000 A 000';
+        pseudo = this.gen.sozialversicherung(hit.match);
         break;
       case 'personalausweis':
-        pseudo = 'L' + String(ctx.sessionMap.size + 1).padStart(9, '0');
+        pseudo = this.gen.personalausweis(hit.match);
         break;
       case 'national-insurance-uk':
-        pseudo = 'AA 00 00 00 A';
+        pseudo = this.gen.ukNationalInsurance(hit.match);
         break;
       case 'nhs-number':
-        pseudo = '000 000 ' + String(ctx.sessionMap.size + 1).padStart(4, '0');
+        pseudo = this.gen.nhsNumber(hit.match);
         break;
       case 'person-name':
       case 'name':
         pseudo = this.gen.person(hit.match);
         break;
       case 'date-of-birth':
-        pseudo = '01.01.1990';
+        pseudo = this.gen.dateOfBirth(hit.match);
         break;
       case 'mac':
-        pseudo = '00:00:00:00:00:' + String(ctx.sessionMap.size + 1).padStart(2, '0');
+        pseudo = this.gen.mac(hit.match);
         break;
       case 'ipv6':
-        pseudo = '::1';
+        pseudo = this.gen.ipv6(hit.match);
         break;
       case 'ticket-jira': {
         // Keep the shape `PREFIX-N` but anonymize both parts. The LLM can
