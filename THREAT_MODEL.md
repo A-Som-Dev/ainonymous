@@ -1,8 +1,8 @@
 # AInonymous Threat Model
 
-Version: 1.1.2
+Version: 1.2.1
 Framework: STRIDE (primary), LINDDUN (appendix)
-Last updated: 2026-04-16
+Last updated: 2026-04-19
 
 This document describes the adversaries AInonymous is designed to mitigate, the adversaries it deliberately does not, and the residual risks that remain after the current mitigations. It is meant to be read alongside `SECURITY.md` (user-facing policy), `OPERATIONS.md` (deployment guidance) and `docs/HANDOVER.md` (open work items).
 

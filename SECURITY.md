@@ -4,8 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.1.x   | Yes       |
-| 1.0.x   | No (unpublished; use `ainonymous@1.1.x`) |
+| 1.2.x   | Yes       |
+| 1.1.x   | No (upgrade to 1.2.x) |
+| 1.0.x   | No (unpublished; use `ainonymous@1.2.x`) |
 
 ## Reporting a Vulnerability
 
