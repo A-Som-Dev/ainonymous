@@ -26,3 +26,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
   node "$SCANNER" --range "$range"
 done
+
+cd "$REPO_ROOT"
+echo "pre-push: prettier --check"
+npx --no-install prettier --check "src/**/*.ts" "tests/**/*.ts"
+echo "pre-push: eslint"
+npx --no-install eslint "src/**/*.ts"
