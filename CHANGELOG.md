@@ -2,6 +2,31 @@
 
 All notable changes to AInonymous are documented here. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is [SemVer](https://semver.org/).
 
+## [1.2.1] - 2026-04-19
+
+Hotfix release addressing crashes, audit integrity, streaming robustness, and config validation found while evaluating v1.2.0 across ten real repositories.
+
+### Fixed
+
+- Constant pseudonym crash family. IPv6, MAC, date-of-birth, UK national insurance, German tax-id, NHS number, sozialversicherung, personalausweis no longer collapse to a single fixed pseudonym. PseudoGen now holds per-type counters and IPv6 pseudonyms live in the RFC 3849 documentation prefix. Each type can absorb at least 10k unique originals before wrap.
+- Sentinel collision. Multiple originals mapping to `***ANONYMIZED***` or `***REDACTED***` no longer throw. The reverse map skips sentinels so a request with two unknown-PII hits completes cleanly.
+- Stream rehydrator leftover buffer is now capped at 1 MB. Truncated SSE streams flush raw instead of growing unbounded.
+- Proxy aborts the upstream request when the client disconnects mid-stream. Previously the upstream agent leaked a socket per aborted request.
+- Audit tail TTY injection. Control characters in `context` payloads are stripped before display.
+- Identity coverage in `doctor` reports per-field. An empty `people` list now warns even if `company` is set, instead of only warning when all three are empty.
+
+### Added
+
+- **`ainonymous audit verify` subcommand**. Walks `--dir`, verifies the SHA-256 hash chain across all JSONL files, and exits 0 on clean chains, 2 on a hash mismatch, 3 under `--strict` when a checkpoint sidecar is missing. `audit tail`, `audit pending`, and `audit export` now print a warn banner when the chain is broken.
+- **`behavior.audit_failure: block | permit`** config key (default `permit`, defaults to `block` under `compliance: gdpr | hipaa | pci-dss`). On persist error under `block` the proxy returns HTTP 503 to the client instead of silently continuing with half-written audit state.
+- Unicode stripping covers bidi overrides (U+202A..E, U+2066..9), tag characters (U+E0000..U+E007F), and variation selectors (U+FE00..U+FE0F). Mathematical Alphanumeric copies of ASCII letters are folded via NFKC per-codepoint. The pre-detection pipeline no longer leaks payloads that hide behind invisible codepoints.
+- Config validator detects self-referencing YAML anchor cycles and fails early with a clear error path, preventing the downstream `JSON.stringify` crash.
+
+### Changed
+
+- `SECURITY.md` supported-versions matrix updated to `1.2.x`.
+- `THREAT_MODEL.md` version header aligned with the release.
+
 ## [1.2.0] - 2026-04-19
 
 Usability and real-world hardening after running the v1.1.3 scanner against nine internal repositories (Java/Spring, Kafka Connect, Python/FastAPI, React, Keycloak/MariaDB infra). The default is now optimized for LLM-readable output while keeping Layers 1+2 strict on secrets and PII.
