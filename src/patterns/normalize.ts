@@ -1,24 +1,43 @@
-// Unicode normalization for pattern matching. Strips zero-width chars and applies
-// NFKC per-codepoint so detectors aren't fooled by ligatures, fullwidth variants,
-// or ZWJ-injected bypass payloads. We keep NFKC (compose) rather than NFKD so
-// precomposed accents like "ü" stay intact - the German address patterns and similar
-// rely on literal "ä/ö/ü" in their character classes. Confusables (kyrillisch vs
-// lateinisch homoglyphs) are NOT handled here - that needs a separate mapping table
-// and is tracked as future work in SECURITY.md.
+const INVISIBLE_SINGLE: ReadonlySet<string> = new Set([
+  '\u200B',
+  '\u200C',
+  '\u200D',
+  '\u200E',
+  '\u200F',
+  '\u202A',
+  '\u202B',
+  '\u202C',
+  '\u202D',
+  '\u202E',
+  '\u2066',
+  '\u2067',
+  '\u2068',
+  '\u2069',
+  '\uFEFF',
+]);
 
-const ZERO_WIDTH = new Set(['\u200B', '\u200C', '\u200D', '\uFEFF']);
+function isVariationSelector(cp: number): boolean {
+  return cp >= 0xfe00 && cp <= 0xfe0f;
+}
+
+function isTagChar(cp: number): boolean {
+  return cp >= 0xe0000 && cp <= 0xe007f;
+}
+
+function shouldStrip(ch: string): boolean {
+  if (INVISIBLE_SINGLE.has(ch)) return true;
+  const cp = ch.codePointAt(0);
+  if (cp === undefined) return false;
+  if (isVariationSelector(cp)) return true;
+  if (isTagChar(cp)) return true;
+  return false;
+}
 
 export interface NormalizedText {
-  /** NFKC-normalized input with zero-width characters stripped. */
   normalized: string;
-  /** For each index in `normalized`, the index of the source codepoint in the
-   *  original string. `undefined` signals an identity map (hot path for ASCII). */
   originalPos: number[] | undefined;
 }
 
-// U+0000..U+007F: plain ASCII, nothing to normalize, nothing to strip.
-// Short-circuit with an identity map so the common case (English code bodies,
-// JSON payloads) stays allocation-free beyond the NormalizedText wrapper.
 function isPureAscii(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
     if (s.charCodeAt(i) > 0x7f) return false;
@@ -34,28 +53,38 @@ export function normalizeForDetection(original: string): NormalizedText {
   const out: string[] = [];
   const pos: number[] = [];
 
-  for (let i = 0; i < original.length; i++) {
-    const ch = original[i];
-    if (ZERO_WIDTH.has(ch)) continue;
+  let i = 0;
+  while (i < original.length) {
+    const cp = original.codePointAt(i);
+    if (cp === undefined) {
+      i++;
+      continue;
+    }
+    const ch = String.fromCodePoint(cp);
+    const advance = ch.length;
+
+    if (shouldStrip(ch)) {
+      i += advance;
+      continue;
+    }
 
     const mapped = ch.normalize('NFKC');
-    // iterate code units so `pos` stays in lockstep with `normalized.length`
     for (let j = 0; j < mapped.length; j++) {
       out.push(mapped[j]);
       pos.push(i);
     }
+
+    i += advance;
   }
 
   return { normalized: out.join(''), originalPos: pos };
 }
 
-/** Convert a match found on `n.normalized` back to start/length in the original string. */
 export function mapMatchToOriginal(
   n: NormalizedText,
   normalizedStart: number,
   normalizedLen: number,
 ): { start: number; length: number } {
-  // identity map: original indices == normalized indices
   if (n.originalPos === undefined) {
     return { start: normalizedStart, length: normalizedLen };
   }
