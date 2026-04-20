@@ -96,6 +96,17 @@ export function validateRawConfig(raw: Record<string, unknown>): ValidationIssue
       issues.push({ path: 'behavior.compliance', message: 'must be a string', severity: 'error' });
     }
 
+    if (typeof b.compliance === 'string' && b.audit_log === false) {
+      const normalized = b.compliance.toLowerCase();
+      if (normalized === 'gdpr' || normalized === 'hipaa' || normalized === 'pci-dss') {
+        issues.push({
+          path: 'behavior.audit_log',
+          message: `compliance=${normalized} requires audit_log: true. disabling the audit log under this preset breaks the accountability principle the preset is supposed to enforce.`,
+          severity: 'error',
+        });
+      }
+    }
+
     if (b.aggression !== undefined) {
       if (b.aggression !== 'low' && b.aggression !== 'medium' && b.aggression !== 'high') {
         issues.push({
