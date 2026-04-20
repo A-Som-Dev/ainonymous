@@ -2,6 +2,30 @@
 
 All notable changes to AInonymous are documented here. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is [SemVer](https://semver.org/).
 
+## [1.2.2] - 2026-04-21
+
+Hardening release covering Unicode bypass gaps, PII coverage under strict compliance presets, and release-pipeline safeguards against orphan Sigstore attestations.
+
+### Fixed
+
+- Unicode invisibles are now stripped by category match (`\p{Cf}`) instead of a hand-maintained range list. U+061C Arabic Letter Mark, U+180E Mongolian Vowel Separator, U+FFF9..FFFB Interlinear Annotation, U+115F/U+1160/U+3164/U+FFA0 Hangul zero-width fillers and U+034F Combining Grapheme Joiner are neutralised before pattern matching. Variation Selectors keep their explicit range check because they live in category `Mn` and a blanket `Mn` strip would remove legitimate combining marks.
+- Expanded PII types under `compliance: hipaa | ccpa | finance | pci-dss` no longer collapse to `***ANONYMIZED***`. SSN, US/UK passport, US/UK driving licence, UK postcode, US ZIP, Canadian SIN, Australian TFN/Medicare, India Aadhaar/PAN, Brazilian CPF/CNPJ, Mexican CURP/RFC, South Korean RRN, South African ID, Hungarian tax/personal ID and Indonesian NIK each get deterministic counter-based pseudonyms that round-trip through rehydrate.
+- `enablePersistence` now performs a probe write-and-delete on the audit directory at startup. Under `audit_failure: block` an unwritable directory throws at boot instead of returning 503 on every request.
+- `audit pending` splits sentinel-only entries out of the rehydration-pending bucket. Originals mapped to `***ANONYMIZED***` cannot rehydrate by design; reporting them as indistinguishable from real misses hid a systemic data-loss class.
+
+### Added
+
+- `/metrics` now exposes `ainonymous_audit_chain_broken{file="..."}` (0/1 gauge per JSONL file) and `ainonymous_audit_chain_broken_total` (counter across files currently failing). Cron-driven `ainonymous audit verify` can alert through Prometheus without an additional sidecar.
+- Proxy emits a single `audit_posture` log line at startup with `audit_log`, `audit_failure`, `audit_dir` and `compliance`. Operators see the effective mode without reading the config back.
+- Release workflow runs `npm publish --dry-run` before the real publish and signs with Sigstore only after `npm publish` succeeds. A new `.githooks/pre-push` check blocks any tag push whose version does not match `package.json.version`. CI has a matching `Verify tag matches package.json version` gate. Structurally prevents the v1.2.1-style orphan Rekor entry.
+- CI workflow runs the secret-diff scanner on pull requests and on the full tree on pushes, so external contributors without `make install-hooks` are still scanned.
+- `OPERATIONS.md` adds a cron template and systemd timer for `ainonymous audit verify --strict`. `SECURITY.md` documents the 503 `audit_persist_failed` retry policy, clarifies that `audit verify` is a chain-consistency check (HMAC tamper-evidence tracked for v1.3), and publishes a known-orphan Rekor index for the v1.2.0 pre-publish signature.
+
+### Changed
+
+- Config validator rejects `compliance: gdpr | hipaa | pci-dss` combined with `audit_log: false`. The combination is internally contradictory; previously it was silently permitted.
+- README CLI reference surfaces `doctor --strict`, `audit verify` (with exit codes) and `behavior.audit_failure`. Pin-version examples in README, OPERATIONS, SECURITY and THREAT_MODEL now point at `1.2.2`.
+
 ## [1.2.1] - 2026-04-19
 
 Hotfix release addressing crashes, audit integrity, streaming robustness, and config validation found while evaluating v1.2.0 across ten real repositories.
