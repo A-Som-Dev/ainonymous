@@ -123,4 +123,7 @@ export interface AuditEntry {
   seq?: number;
   /** SHA-256 of (prevHash + serialized current entry without prevHash). Empty string for seq=0. */
   prevHash?: string;
+  /** Pseudonym was the blanket sentinel. The rehydrator cannot map it back,
+   *  so the original is structurally invisible to audit pending diffing. */
+  sentinel?: true;
 }

@@ -1,19 +1,8 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import type { AuditEntry } from '../types.js';
-import { verifyAuditChain } from '../audit/logger.js';
-
-function findLogFiles(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.startsWith('ainonymous-audit-') && f.endsWith('.jsonl'))
-      .sort()
-      .map((f) => join(dir, f));
-  } catch {
-    return [];
-  }
-}
+import { findLogFiles, verifyFile, type VerifyResult } from '../audit/verify-scan.js';
 
 function readJsonlFile(path: string): AuditEntry[] {
   const content = readFileSync(path, 'utf-8');
@@ -59,52 +48,6 @@ function formatEntry(e: AuditEntry): string {
   )})`;
 }
 
-interface VerifyResult {
-  file: string;
-  status: 'ok' | 'tamper' | 'missing-checkpoint';
-  badSeq?: number;
-  lastSeq?: number;
-}
-
-function verifyFile(path: string, strict: boolean): VerifyResult {
-  const ckptPath = path + '.checkpoint';
-  const lines = readFileSync(path, 'utf-8').split('\n');
-
-  let expected: { lastSeq: number; lastHash: string } | 'required' | undefined;
-  if (existsSync(ckptPath)) {
-    try {
-      expected = JSON.parse(readFileSync(ckptPath, 'utf-8')) as {
-        lastSeq: number;
-        lastHash: string;
-      };
-    } catch {
-      return { file: path, status: 'tamper', badSeq: -1 };
-    }
-  } else if (strict) {
-    expected = 'required';
-  }
-
-  const bad = verifyAuditChain(lines, expected);
-  if (bad !== null) {
-    if (expected === 'required') {
-      return { file: path, status: 'missing-checkpoint' };
-    }
-    return { file: path, status: 'tamper', badSeq: bad };
-  }
-  const lastEntry = lines
-    .filter((l) => l.trim())
-    .map((l) => {
-      try {
-        return JSON.parse(l) as AuditEntry;
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is AuditEntry => e !== null)
-    .at(-1);
-  return { file: path, status: 'ok', lastSeq: lastEntry?.seq };
-}
-
 function warnIfChainBroken(dir: string): void {
   const files = findLogFiles(dir);
   const broken: VerifyResult[] = [];
@@ -126,7 +69,9 @@ export function registerAuditCmd(program: Command): void {
 
   audit
     .command('verify')
-    .description('Verify hash-chain integrity across all audit log files')
+    .description(
+      'Chain-consistency check across all audit log files (not tamper-evidence authentication; HMAC-signed checkpoints deferred to v1.3, see THREAT_MODEL.md)',
+    )
     .option('--dir <path>', 'audit log directory', './ainonymous-audit')
     .option('--strict', 'require a checkpoint sidecar to exist for every log file')
     .action((opts: { dir: string; strict?: boolean }) => {
@@ -209,12 +154,19 @@ export function registerAuditCmd(program: Command): void {
         }
       }
 
+      // Sentinel-mapped originals can never rehydrate (by design: no reverse
+      // entry in the session map). Reporting them in the same bucket as
+      // genuinely unmatched pseudos hides a systemic data-loss class, so
+      // split them out.
+      const sentinelOnly: AuditEntry[] = [];
       const pending: AuditEntry[] = [];
       for (const [hash, entry] of anonymized) {
-        if (!rehydrated.has(hash)) pending.push(entry);
+        if (rehydrated.has(hash)) continue;
+        if (entry.sentinel) sentinelOnly.push(entry);
+        else pending.push(entry);
       }
 
-      if (pending.length === 0) {
+      if (pending.length === 0 && sentinelOnly.length === 0) {
         console.log('No pending pseudonyms. All anonymized originals were rehydrated.');
         return;
       }
@@ -223,8 +175,19 @@ export function registerAuditCmd(program: Command): void {
       for (const e of pending) {
         console.log(formatEntry(e));
       }
+
+      if (sentinelOnly.length > 0) {
+        console.log(
+          `\n[sentinel-only] ${sentinelOnly.length} entries mapped to ***ANONYMIZED*** (not rehydratable by design):`,
+        );
+        sentinelOnly.sort((a, b) => a.timestamp - b.timestamp);
+        for (const e of sentinelOnly) {
+          console.log(formatEntry(e));
+        }
+      }
+
       console.log(
-        `\n${pending.length} pending of ${anonymized.size} anonymized (${rehydrated.size} rehydrated)`,
+        `\n${pending.length} rehydration-pending, ${sentinelOnly.length} sentinel-only of ${anonymized.size} anonymized (${rehydrated.size} rehydrated)`,
       );
     });
 

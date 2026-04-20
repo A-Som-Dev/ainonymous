@@ -1,7 +1,15 @@
-import { createHash } from 'node:crypto';
-import { writeFileSync, appendFileSync, mkdirSync, statSync, existsSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  writeFileSync,
+  appendFileSync,
+  mkdirSync,
+  statSync,
+  existsSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { AuditEntry, Replacement, AuditLayer } from '../types.js';
+import { isSentinel } from '../session/map.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -52,6 +60,7 @@ export class AuditLogger {
       originalHash: hashTruncated(r.original),
       context: `${r.type}@${r.offset}:${r.length}`,
       seq: this.seq++,
+      ...(isSentinel(r.pseudonym) ? { sentinel: true as const } : {}),
     };
     const entry: AuditEntry = { ...base, prevHash: this.lastHash };
     this.lastHash = chainHash(this.lastHash, base);
@@ -120,7 +129,18 @@ export class AuditLogger {
   }
 
   enablePersistence(dir: string, failureMode: AuditFailureMode = 'permit'): void {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const probe = join(dir, `.ainonymous-probe-${randomBytes(6).toString('hex')}`);
+      writeFileSync(probe, '', 'utf-8');
+      unlinkSync(probe);
+    } catch (err) {
+      const msg = `audit probe-write failed for ${dir}: ${err instanceof Error ? err.message : String(err)}`;
+      if (failureMode === 'block') {
+        throw new AuditPersistError(msg, err);
+      }
+      console.error(`WARNING: ${msg} - proxy started under auditFailure=permit`);
+    }
     this.persistDir = dir;
     this.failureMode = failureMode;
   }
