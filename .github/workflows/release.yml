@@ -25,6 +25,16 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - name: Verify tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag $GITHUB_REF_NAME ($TAG_VERSION) does not match package.json ($PKG_VERSION)" >&2
+            echo "bump package.json and re-tag before publishing" >&2
+            exit 1
+          fi
+
       - name: Pack npm tarball
         id: pack
         run: |
@@ -34,6 +44,16 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+
+      - name: Dry-run npm publish to catch version/name mismatches
+        run: npm publish --dry-run --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - uses: sigstore/cosign-installer@v3
         with:
@@ -54,11 +74,6 @@ jobs:
             --bundle sbom.cdx.json.sigstore.json \
             --output-signature sbom.cdx.json.sig \
             --output-certificate sbom.cdx.json.pem
-
-      - name: Publish to npm with provenance
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - uses: softprops/action-gh-release@v2
         with:
