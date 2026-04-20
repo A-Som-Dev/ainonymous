@@ -1,36 +1,28 @@
-const INVISIBLE_SINGLE: ReadonlySet<string> = new Set([
-  '\u200B',
-  '\u200C',
-  '\u200D',
-  '\u200E',
-  '\u200F',
-  '\u202A',
-  '\u202B',
-  '\u202C',
-  '\u202D',
-  '\u202E',
-  '\u2066',
-  '\u2067',
-  '\u2068',
-  '\u2069',
-  '\uFEFF',
+const CF_RE = /^\p{Cf}$/u;
+
+// Variation Selectors are Mn (nonspacing marks), not Cf. Stripping the whole
+// Mn category would eat legitimate combining accents, so pin the two VS blocks.
+function isVariationSelector(cp: number): boolean {
+  if (cp >= 0xfe00 && cp <= 0xfe0f) return true;
+  if (cp >= 0xe0100 && cp <= 0xe01ef) return true;
+  return false;
+}
+
+// Width-zero codepoints that render as nothing on every shipping font but are
+// NOT in category Cf. Kept as an explicit allow-list because the surrounding
+// categories (Lo, Mn) also contain legitimate glyphs that must survive.
+const WIDTH_ZERO_EXTRA: ReadonlySet<number> = new Set([
+  0x115f, // Hangul Choseong Filler (Lo)
+  0x1160, // Hangul Jungseong Filler (Lo)
+  0x3164, // Hangul Filler (Lo)
+  0xffa0, // Halfwidth Hangul Filler (Lo)
+  0x034f, // Combining Grapheme Joiner (Mn, width-0 by design)
 ]);
 
-function isVariationSelector(cp: number): boolean {
-  return cp >= 0xfe00 && cp <= 0xfe0f;
-}
-
-function isTagChar(cp: number): boolean {
-  return cp >= 0xe0000 && cp <= 0xe007f;
-}
-
-function shouldStrip(ch: string): boolean {
-  if (INVISIBLE_SINGLE.has(ch)) return true;
-  const cp = ch.codePointAt(0);
-  if (cp === undefined) return false;
+function shouldStrip(ch: string, cp: number): boolean {
+  if (CF_RE.test(ch)) return true;
   if (isVariationSelector(cp)) return true;
-  if (isTagChar(cp)) return true;
-  return false;
+  return WIDTH_ZERO_EXTRA.has(cp);
 }
 
 export interface NormalizedText {
@@ -63,7 +55,7 @@ export function normalizeForDetection(original: string): NormalizedText {
     const ch = String.fromCodePoint(cp);
     const advance = ch.length;
 
-    if (shouldStrip(ch)) {
+    if (shouldStrip(ch, cp)) {
       i += advance;
       continue;
     }
