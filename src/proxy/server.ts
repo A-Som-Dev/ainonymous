@@ -7,6 +7,8 @@ import { serveDashboard, serveDashboardAsset, serveSSE } from '../audit/dashboar
 import { collectBody, parseRequest, replaceTextInJson, detectApiFormat } from './interceptor.js';
 import { forwardWithRehydration } from './forwarder.js';
 import { anonymizeHeaders } from './header-anonymizer.js';
+import { scanAuditDir } from '../audit/verify-scan.js';
+import { basename } from 'node:path';
 import { log } from '../logger.js';
 
 interface ProxyServerOptions {
@@ -92,6 +94,13 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
     const dir = opts.config.behavior.auditDir || './ainonymous-audit';
     auditLogger.enablePersistence(dir, opts.config.behavior.auditFailure);
   }
+
+  log.info('audit_posture', {
+    audit_log: opts.config.behavior.auditLog,
+    audit_failure: opts.config.behavior.auditFailure,
+    audit_dir: opts.config.behavior.auditDir || './ainonymous-audit',
+    compliance: opts.config.behavior.compliance ?? 'none',
+  });
 
   const pipeline = opts.pipeline ?? new Pipeline(opts.config, auditLogger);
   const stats: ProxyStats = { requestCount: 0, startedAt: Date.now() };
@@ -200,6 +209,9 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
 
     if (path === '/metrics') {
       const auditStats = auditLogger.stats();
+      const auditDir = opts.config.behavior.auditDir || './ainonymous-audit';
+      const scan = scanAuditDir(auditDir);
+      const brokenFiles = scan.filter((r) => r.status !== 'ok');
       const lines = [
         '# HELP ainonymous_uptime_seconds Proxy uptime',
         '# TYPE ainonymous_uptime_seconds gauge',
@@ -216,7 +228,18 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
         `ainonymous_replacements_total{layer="identity"} ${auditStats.identity}`,
         `ainonymous_replacements_total{layer="code"} ${auditStats.code}`,
         `ainonymous_replacements_total{layer="rehydration"} ${auditStats.rehydrated}`,
+        '# HELP ainonymous_audit_chain_broken Per-file audit chain status (1 = tampered or missing checkpoint)',
+        '# TYPE ainonymous_audit_chain_broken gauge',
       ];
+      for (const res of scan) {
+        const val = res.status === 'ok' ? 0 : 1;
+        lines.push(`ainonymous_audit_chain_broken{file="${basename(res.file)}"} ${val}`);
+      }
+      lines.push(
+        '# HELP ainonymous_audit_chain_broken_total Files currently failing chain verification',
+        '# TYPE ainonymous_audit_chain_broken_total counter',
+        `ainonymous_audit_chain_broken_total ${brokenFiles.length}`,
+      );
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       res.end(lines.join('\n') + '\n');
       return;
