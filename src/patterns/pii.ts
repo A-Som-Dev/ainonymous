@@ -83,8 +83,8 @@ export const PII_PATTERNS: PatternRule[] = [
     // Match 13-19 digit card numbers with optional separators every 4 digits.
     // Accept space/dash/dot only. slash/pipe/colon/underscore appear in URL
     // paths and log prefixes where a Luhn-valid subsequence is an unavoidable
-    // false positive (see RT-203). Nakedly concatenated cards stay matched
-    // via the no-separator alternative. Luhn is the real guard.
+    // false positive. Nakedly concatenated cards stay matched via the
+    // no-separator alternative. Luhn is the real guard.
     type: 'credit-card',
     regex: /(?<!\d)\d{4}[\s\-.]?\d{4}[\s\-.]?\d{4}[\s\-.]?\d{1,7}(?!\d)/g,
     filter: (match) => luhnValid(match.replace(/\D/g, '')),

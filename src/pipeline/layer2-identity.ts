@@ -256,6 +256,72 @@ export class IdentityLayer implements Layer {
       case 'ipv6':
         pseudo = this.gen.ipv6(hit.match);
         break;
+      case 'ssn':
+        pseudo = this.gen.ssn(hit.match);
+        break;
+      case 'zip-code-us':
+        pseudo = this.gen.zipCodeUs(hit.match);
+        break;
+      case 'passport-us':
+        pseudo = this.gen.passportUs(hit.match);
+        break;
+      case 'passport-uk':
+        pseudo = this.gen.passportUk(hit.match);
+        break;
+      case 'driving-license-us':
+        pseudo = this.gen.drivingLicenseUs(hit.match);
+        break;
+      case 'driving-license-uk':
+        pseudo = this.gen.drivingLicenseUk(hit.match);
+        break;
+      case 'postcode-uk':
+        pseudo = this.gen.postcodeUk(hit.match);
+        break;
+      case 'canadian-sin':
+        pseudo = this.gen.canadianSin(hit.match);
+        break;
+      case 'australian-tfn':
+        pseudo = this.gen.australianTfn(hit.match);
+        break;
+      case 'australian-medicare':
+        pseudo = this.gen.australianMedicare(hit.match);
+        break;
+      case 'india-aadhaar':
+        pseudo = this.gen.indiaAadhaar(hit.match);
+        break;
+      case 'india-pan':
+        pseudo = this.gen.indiaPan(hit.match);
+        break;
+      case 'brazilian-cpf':
+        pseudo = this.gen.brazilianCpf(hit.match);
+        break;
+      case 'brazilian-cnpj':
+        pseudo = this.gen.brazilianCnpj(hit.match);
+        break;
+      case 'mexican-curp':
+        pseudo = this.gen.mexicanCurp(hit.match);
+        break;
+      case 'mexican-rfc':
+        pseudo = this.gen.mexicanRfc(hit.match);
+        break;
+      case 'south-korean-rrn':
+        pseudo = this.gen.southKoreanRrn(hit.match);
+        break;
+      case 'south-africa-id':
+        pseudo = this.gen.southAfricaId(hit.match);
+        break;
+      case 'hungarian-tax-id':
+        pseudo = this.gen.hungarianTaxId(hit.match);
+        break;
+      case 'hungarian-personal-id':
+        pseudo = this.gen.hungarianPersonalId(hit.match);
+        break;
+      case 'indonesia-nik':
+        pseudo = this.gen.indonesiaNik(hit.match);
+        break;
+      case 'german-tax-id':
+        pseudo = this.gen.taxId(hit.match);
+        break;
       case 'ticket-jira': {
         // Keep the shape `PREFIX-N` but anonymize both parts. The LLM can
         // still tell it's a ticket reference, just not which one.

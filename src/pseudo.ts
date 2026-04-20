@@ -57,6 +57,27 @@ export class PseudoGen {
     creditCard: 0,
     address: 0,
     personalausweis: 0,
+    ssn: 0,
+    zipUs: 0,
+    passportUs: 0,
+    passportUk: 0,
+    dlUs: 0,
+    dlUk: 0,
+    postcodeUk: 0,
+    sinCa: 0,
+    tfnAu: 0,
+    medicareAu: 0,
+    aadhaar: 0,
+    pan: 0,
+    cpf: 0,
+    cnpj: 0,
+    curp: 0,
+    rfc: 0,
+    rrnKr: 0,
+    idZa: 0,
+    taxIdHu: 0,
+    pidHu: 0,
+    nikId: 0,
   };
 
   private cached(key: string, generator: () => string): string {
@@ -215,6 +236,164 @@ export class PseudoGen {
     });
   }
 
+  ssn(original: string): string {
+    return this.cached(`ssn:${original}`, () => {
+      const n = ++this.counters.ssn;
+      const d = String(n).padStart(9, '0');
+      return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
+    });
+  }
+
+  zipCodeUs(original: string): string {
+    return this.cached(`zipus:${original}`, () => {
+      const n = ++this.counters.zipUs;
+      return String(n).padStart(5, '0');
+    });
+  }
+
+  passportUs(original: string): string {
+    return this.cached(`passus:${original}`, () => {
+      const n = ++this.counters.passportUs;
+      return String(n).padStart(9, '0');
+    });
+  }
+
+  passportUk(original: string): string {
+    return this.cached(`passuk:${original}`, () => {
+      const n = ++this.counters.passportUk;
+      return String(n).padStart(9, '0');
+    });
+  }
+
+  drivingLicenseUs(original: string): string {
+    return this.cached(`dlus:${original}`, () => {
+      const n = ++this.counters.dlUs;
+      return `D${String(n).padStart(8, '0')}`;
+    });
+  }
+
+  drivingLicenseUk(original: string): string {
+    return this.cached(`dluk:${original}`, () => {
+      const n = ++this.counters.dlUk;
+      return `ANONY${String(n).padStart(7, '0')}ZZZZ`;
+    });
+  }
+
+  postcodeUk(original: string): string {
+    return this.cached(`postuk:${original}`, () => {
+      const n = ++this.counters.postcodeUk;
+      const d1 = n % 10;
+      const d2 = Math.floor(n / 10) % 10;
+      const l1 = String.fromCharCode(65 + (Math.floor(n / 100) % 26));
+      const l2 = String.fromCharCode(65 + (Math.floor(n / (100 * 26)) % 26));
+      return `ZZ${d1} ${d2}${l1}${l2}`;
+    });
+  }
+
+  canadianSin(original: string): string {
+    return this.cached(`sinca:${original}`, () => {
+      const n = ++this.counters.sinCa;
+      const d = String(n).padStart(9, '0');
+      return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    });
+  }
+
+  australianTfn(original: string): string {
+    return this.cached(`tfnau:${original}`, () => {
+      const n = ++this.counters.tfnAu;
+      const d = String(n).padStart(9, '0');
+      return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    });
+  }
+
+  australianMedicare(original: string): string {
+    return this.cached(`medau:${original}`, () => {
+      const n = ++this.counters.medicareAu;
+      return String(n).padStart(10, '0');
+    });
+  }
+
+  indiaAadhaar(original: string): string {
+    return this.cached(`aad:${original}`, () => {
+      const n = ++this.counters.aadhaar;
+      const d = String(n).padStart(12, '0');
+      return `${d.slice(0, 4)} ${d.slice(4, 8)} ${d.slice(8)}`;
+    });
+  }
+
+  indiaPan(original: string): string {
+    return this.cached(`pan:${original}`, () => {
+      const n = ++this.counters.pan;
+      return `AAAAA${String(n).padStart(4, '0')}Z`;
+    });
+  }
+
+  brazilianCpf(original: string): string {
+    return this.cached(`cpf:${original}`, () => {
+      const n = ++this.counters.cpf;
+      const d = String(n).padStart(11, '0');
+      return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+    });
+  }
+
+  brazilianCnpj(original: string): string {
+    return this.cached(`cnpj:${original}`, () => {
+      const n = ++this.counters.cnpj;
+      const d = String(n).padStart(14, '0');
+      return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+    });
+  }
+
+  mexicanCurp(original: string): string {
+    return this.cached(`curp:${original}`, () => {
+      const n = ++this.counters.curp;
+      return `ANON${String(n).padStart(8, '0')}XXXXXX`;
+    });
+  }
+
+  mexicanRfc(original: string): string {
+    return this.cached(`rfc:${original}`, () => {
+      const n = ++this.counters.rfc;
+      return `ANON${String(n).padStart(9, '0')}`;
+    });
+  }
+
+  southKoreanRrn(original: string): string {
+    return this.cached(`rrnkr:${original}`, () => {
+      const n = ++this.counters.rrnKr;
+      const d = String(n).padStart(13, '0');
+      return `${d.slice(0, 6)}-${d.slice(6)}`;
+    });
+  }
+
+  southAfricaId(original: string): string {
+    return this.cached(`idza:${original}`, () => {
+      const n = ++this.counters.idZa;
+      return String(n).padStart(13, '0');
+    });
+  }
+
+  hungarianTaxId(original: string): string {
+    return this.cached(`taxhu:${original}`, () => {
+      const n = ++this.counters.taxIdHu;
+      return String(n).padStart(10, '0');
+    });
+  }
+
+  hungarianPersonalId(original: string): string {
+    return this.cached(`pidhu:${original}`, () => {
+      const n = ++this.counters.pidHu;
+      return String(n).padStart(11, '0');
+    });
+  }
+
+  indonesiaNik(original: string): string {
+    return this.cached(`nikid:${original}`, () => {
+      const n = ++this.counters.nikId;
+      return String(n).padStart(16, '0');
+    });
+  }
+
   clear(): void {
     this.cache.clear();
     this.counters = {
@@ -235,6 +414,27 @@ export class PseudoGen {
       creditCard: 0,
       address: 0,
       personalausweis: 0,
+      ssn: 0,
+      zipUs: 0,
+      passportUs: 0,
+      passportUk: 0,
+      dlUs: 0,
+      dlUk: 0,
+      postcodeUk: 0,
+      sinCa: 0,
+      tfnAu: 0,
+      medicareAu: 0,
+      aadhaar: 0,
+      pan: 0,
+      cpf: 0,
+      cnpj: 0,
+      curp: 0,
+      rfc: 0,
+      rrnKr: 0,
+      idZa: 0,
+      taxIdHu: 0,
+      pidHu: 0,
+      nikId: 0,
     };
   }
 }
