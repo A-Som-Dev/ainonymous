@@ -207,6 +207,9 @@ behavior:
   interactive: true
   audit_log: true
   audit_dir: ./ainonymous-audit  # JSONL logs for SIEM integration
+  audit_failure: permit  # block | permit. block returns 503 on persist failure
+                         # (default under compliance: gdpr/hipaa/pci-dss);
+                         # permit logs a warning and continues.
   dashboard: true
   port: 8100
   compliance: gdpr  # or hipaa, ccpa, pci-dss, finance, healthcare
@@ -285,6 +288,7 @@ Browsers cannot attach `Authorization` headers to `<link>` / `<script>` / `Event
 | `ainonymous init` | Scan project, generate `.ainonymous.yml` |
 | `ainonymous init --show` | Print the generated YAML to stdout without writing it |
 | `ainonymous doctor` | Validate node version, config and port availability before first start |
+| `ainonymous doctor --strict` | Same as `doctor`, but exits non-zero on any warning. Wire into CI. |
 | `ainonymous start` | Start the proxy server |
 | `ainonymous start --open` | Start and open the dashboard in the default browser |
 | `ainonymous stop` | Stop the running proxy |
@@ -293,7 +297,8 @@ Browsers cannot attach `Authorization` headers to `<link>` / `<script>` / `Event
 | `ainonymous scan --preview N` | Dry run: dump before/after text for the first N files with findings |
 | `ainonymous scan -v` | Dry run: raw per-finding dump |
 | `ainonymous audit tail` | Show last 20 audit log entries |
-| `ainonymous audit pending` | Show pseudonyms the LLM response never referenced |
+| `ainonymous audit pending` | Show pseudonyms the LLM response never referenced; splits sentinel-only entries out |
+| `ainonymous audit verify` | Verify the SHA-256 hash chain across all audit JSONL files. Exit 0 clean, 2 tamper, 3 missing checkpoint under `--strict` |
 | `ainonymous audit export` | Export logs as consolidated JSON (SIEM-ready) |
 | `ainonymous config migrate` | Upgrade an older `.ainonymous.yml` to the current schema |
 | `ainonymous glossary add <term>` | Add a domain term to config |
@@ -381,7 +386,7 @@ If you're evaluating AInonymous on behalf of a security / privacy / legal organi
 
 Telemetry: AInonymous does not send any data anywhere except the configured upstream LLM endpoint. There is no phone-home, no usage tracking, no error-reporting service. You can verify with `tcpdump` on `lo0`/`eth0` during a session - the only outbound connection is HTTPS to `api.anthropic.com` / `api.openai.com` (or the upstream you configured).
 
-Maintenance model: solo-maintained, MIT-licensed, responses best-effort (see SECURITY.md). For enterprise adoption consider pinning the exact version (`"ainonymous": "1.1.2"`, not `^`) and verifying Sigstore signatures on every upgrade. Commercial support is not part of this repository - see the "About" section at the bottom for contact.
+Maintenance model: solo-maintained, MIT-licensed, responses best-effort (see SECURITY.md). For enterprise adoption consider pinning the exact version (`"ainonymous": "1.2.2"`, not `^`), running `npm audit signatures` on upgrade, and verifying Sigstore signatures on the GitHub Release tarball. Commercial support is not part of this repository - see the "About" section at the bottom for contact.
 
 ## Contributing
 

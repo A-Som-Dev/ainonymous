@@ -102,7 +102,7 @@ The tarball on the GitHub Release and the tarball on the npm registry both come 
 Install cosign (`brew install cosign`, `apt install cosign`, or grab a binary from [sigstore/cosign releases](https://github.com/sigstore/cosign/releases)), download the tarball plus its `.sigstore.json` from the Release page, then:
 
 ```bash
-VERSION=1.1.2   # replace with the version you downloaded
+VERSION=1.2.2   # replace with the version you downloaded
 
 cosign verify-blob "ainonymous-${VERSION}.tgz" \
   --bundle "ainonymous-${VERSION}.tgz.sigstore.json" \
@@ -134,6 +134,20 @@ npm audit signatures
 
 Output should include `verified registry signature` and `verified attestation` for `ainonymous`. If `npm audit signatures` reports a missing or invalid attestation for a version, do not trust that version.
 
+### Known Orphan Provenance Entries
+
+The public [Rekor](https://rekor.sigstore.dev/) transparency log is append-only. A release build that passed the Sigstore signing step but failed the subsequent `npm publish` (version-mismatch, 403, network error) leaves a signature entry in Rekor that corresponds to no published npm digest. These are orphans: legitimate attestations, but nothing reachable via `npm audit signatures` maps to them.
+
+Since v1.2.2 the release workflow has been reordered (publish-before-sign) and a tag-vs-package.json gate runs both locally (pre-push hook) and in CI. Orphan entries can no longer be produced by the happy path. The pre-v1.2.2 orphans stay visible in Rekor forever and are listed here so auditors can cross-check them:
+
+| Rekor index | Tag       | Reason                                         |
+|-------------|-----------|------------------------------------------------|
+| 1340775699  | v1.2.0    | Initial v1.2.0 tag pushed with package.json still on 1.1.3. `npm publish` rejected with 403, Sigstore attestation already committed. Re-release fixed the version bump; the rejected digest remains orphan in Rekor. |
+
+To verify: fetch the Rekor entry with `cosign tree ainonymous@1.2.0` and note two entries. The one that does NOT correspond to the npm-published sha512 is the orphan. The signer identity (GitHub Actions OIDC from this repository) is the same on both. Consumers of `npm install ainonymous@1.2.0` only ever see the published, `npm audit signatures`-verifiable one.
+
+If you find additional orphans that are not in this table, please report them via the SECURITY contact — they indicate either a new bypass of the v1.2.2 gates or a signer-identity theft.
+
 ## Session Map Persistence (opt-in)
 
 By default the session map lives only in process memory and is discarded on exit. Setting `session.persist: true` in `.ainonymous.yml` (optionally with `session.persist_path: "./ainonymous-session.db"`) enables a SQLite-backed write-through cache so that pseudonyms survive restarts. useful when an in-flight LLM response arrives after the proxy was restarted, or when multiple short-lived wrapper invocations (`ainonymous -- git commit`) need a shared mapping.
@@ -154,6 +168,15 @@ When in doubt: leave `session.persist: false`. The feature exists for continuity
 **Pseudonym collision guard.** Since v1.2 the BiMap's `set()` throws when a second *different* original tries to bind to an existing pseudonym. `PseudoGen` cycles 24 Greek letters and then appends numeric suffixes, so a long-running persisted DB can, in principle, generate the same pseudonym for two unrelated originals across restarts. Without the guard the reverse map would silently be overwritten and `rehydrate()` would return the wrong original for the winner pseudonym. If you hit this exception in production: restart the proxy and rotate `AINONYMOUS_SESSION_KEY` (fresh key → fresh DB state → fresh generator).
 
 **Audit-log truncation detection.** The hash chain alone stays internally consistent when an attacker with write access removes the tail of a `ainonymous-audit-YYYY-MM-DD.jsonl` file. Since v1.2 a sidecar `<file>.checkpoint` is written after every entry with `{lastSeq, lastHash}`. `verifyAuditChain(lines, expected)` takes the checkpoint as a required second input and reports tampering when the tail of the file no longer matches. Operators that script audit verification must pass `expected: 'required'` (or the parsed checkpoint) rather than the optional-mode default, otherwise a concurrent delete of both the JSONL tail and the checkpoint would still verify clean.
+
+The verifier is a **chain-consistency check**, not a tamper-evidence authentication in the cryptographic sense. An attacker with write access to both the JSONL file and the `.checkpoint` can truncate both and compute a self-consistent chain. HMAC-signed checkpoints are tracked for v1.3 (see THREAT_MODEL.md). Until then, replicate `.checkpoint` files to an append-only store (S3 Object Lock, remote syslog, a git-backed archive) so external storage provides the tamper evidence the current scheme does not.
+
+**HTTP 503 `audit_persist_failed` semantics.** When `behavior.audit_failure: block` is active (default under `compliance: gdpr | hipaa | pci-dss`) and the audit-log write fails (disk full, permission error, read-only filesystem), the proxy returns `HTTP 503` with body `{"error":"audit_persist_failed"}`. This is a deliberate availability-for-compliance trade-off: the request is refused rather than silently forwarded without an audit trail.
+
+- **Retry strategy**: do not retry automatically. The condition is typically an operator-fixable state (out-of-space, wrong mount, ACL drift). Clients should back off until a human acknowledges. If the proxy sits behind a load balancer, mark the instance unhealthy on 503 and page on-call rather than cycling through retries.
+- **Detection**: the proxy now probes the audit directory at startup and fails loud under `block` if the probe-write cannot complete. Operators see the failure in the service's stdout/stderr, not via 503-on-every-request. The `/metrics` endpoint also exposes `ainonymous_audit_chain_broken_total` for Prometheus alerts.
+- **Recovery**: fix the underlying filesystem, restart the proxy. `audit verify --strict` should be run before opening traffic back up.
+- **DoS vector**: an attacker with write access to the audit directory could trigger permanent 503s by filling the disk or removing write permission. Monitor disk and `audit_dir` ACLs; treat the audit volume as a tamper-sensitive resource.
 
 ## Unicode Normalization
 

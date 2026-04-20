@@ -16,7 +16,11 @@ docker run -d --name ainonymous \
   -p 127.0.0.1:8100:8100 \
   -v /var/lib/ainonymous/audit:/app/ainonymous-audit \
   -e AINONYMOUS_HOST=0.0.0.0 \
-  ainonymous:1.1.2
+  ainonymous:1.2.2
+
+# Pre-flight check (exit non-zero under --strict if node version,
+# port availability, or config validation produce any warning)
+ainonymous doctor --strict
 
 # Graceful shutdown
 ainonymous stop
@@ -63,7 +67,28 @@ CLI user-facing messages (`proxy started on ...`) stay plain text. filter them o
 
 Entries are hash-chained JSONL in `./ainonymous-audit/ainonymous-audit-YYYY-MM-DD.jsonl`. Files rotate at 10 MB to `.part1.jsonl`, `.part2.jsonl`, etc.
 
-**Verify integrity:**
+**Verify integrity (CLI):**
+
+```bash
+ainonymous audit verify --dir /var/lib/ainonymous/audit
+# exit 0 = clean
+# exit 2 = tamper (hash mismatch)
+# exit 3 = missing-checkpoint (only under --strict)
+
+# Strict mode: also treat a missing .checkpoint sidecar as tamper.
+# Recommended for nightly SIEM runs.
+ainonymous audit verify --dir /var/lib/ainonymous/audit --strict
+```
+
+The verifier is a **chain-consistency check**, not a tamper-evidence
+authentication. Checkpoint sidecars commit `lastSeq + lastHash`, but an
+attacker with write access to both the JSONL files and the `.checkpoint` can
+truncate both and re-derive a self-consistent chain. HMAC-signed checkpoints
+are tracked for v1.3 (see THREAT_MODEL.md). Meanwhile,
+ship `.checkpoint` files to an append-only store (S3 Object Lock, git
+commit, remote syslog) for external tamper evidence.
+
+**Library usage:**
 
 ```js
 import { verifyAuditChain } from 'ainonymous/dist/audit/logger.js';
@@ -74,7 +99,39 @@ const badSeq = verifyAuditChain(lines);
 console.log(badSeq === null ? 'OK' : `chain broken at seq=${badSeq}`);
 ```
 
-A non-null result means an entry was tampered with or lost. The chain cannot detect tampering of the *last* entry. for that, use a periodic external checkpoint (e.g. digest the full file and commit to an append-only store).
+### Cron Template
+
+Nightly verify with alerting. Exit non-zero wakes the operator:
+
+```cron
+# /etc/cron.d/ainonymous-audit-verify
+0 3 * * * ainonymous /usr/bin/env bash -c 'ainonymous audit verify --dir /var/lib/ainonymous/audit --strict || echo "ainonymous audit chain broken on $(hostname)" | mail -s "AUDIT ALERT" ops@example.com'
+```
+
+systemd-timer alternative (`/etc/systemd/system/ainonymous-audit-verify.{service,timer}`):
+
+```ini
+# .service
+[Unit]
+Description=AInonymous audit chain verify
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ainonymous audit verify --dir /var/lib/ainonymous/audit --strict
+User=ainonymous
+
+# .timer
+[Unit]
+Description=Nightly audit chain verify
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+The Prometheus endpoint exposes `ainonymous_audit_chain_broken_total` (counter
+of currently-failing files) and `ainonymous_audit_chain_broken{file="..."}`
+(per-file 0/1 gauge). Alert on either > 0.
 
 **Retention:** No automatic purge. AInonymous treats retention as an operator responsibility, not a library concern. your legal/compliance requirements vary and an opinionated built-in would be wrong for many deployments. Schedule a cron job matching your policy (GDPR Art. 17, "right to erasure", typically 30-90 days for operational logs):
 
@@ -124,7 +181,7 @@ ainonymous stop
 
 # 3. Upgrade
 npm install -g ainonymous@latest
-# or: docker pull ainonymous:1.1.2
+# or: docker pull ainonymous:1.2.2
 
 # 4. Start
 ainonymous start

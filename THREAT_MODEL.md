@@ -1,6 +1,6 @@
 # AInonymous Threat Model
 
-Version: 1.2.1
+Version: 1.2.2
 Framework: STRIDE (primary), LINDDUN (appendix)
 Last updated: 2026-04-19
 
@@ -275,7 +275,13 @@ Documented in `SECURITY.md`. An SSE event boundary can land mid-pseudonym (`Alph
 
 ### R5 - Supply-chain integrity of published releases
 
-The package is built and published through GitHub Actions. Releases are signed via Sigstore (keyless, via GitHub OIDC) and npm publishes carry a provenance attestation (P1-3, closed). A compromised npm token could still publish a trojaned `ainonymous@latest`, but downstream users can detect it via `npm audit signatures` (rejects missing/invalid provenance) and cosign verification of the GitHub Release tarball. Mitigation today: pin to an exact version (e.g. `"ainonymous": "1.1.2"`, not `^`), run `npm audit signatures` before upgrading, diff-review the diff between tags for unexpected dependency additions.
+The package is built and published through GitHub Actions. Releases are signed via Sigstore (keyless, via GitHub OIDC) and npm publishes carry a provenance attestation (P1-3, closed). A compromised npm token could still publish a trojaned `ainonymous@latest`, but downstream users can detect it via `npm audit signatures` (rejects missing/invalid provenance) and cosign verification of the GitHub Release tarball. Mitigation today: pin to an exact version (e.g. `"ainonymous": "1.2.2"`, not `^`), run `npm audit signatures` before upgrading, diff-review the diff between tags for unexpected dependency additions.
+
+### Audit integrity: chain-consistency vs tamper-evidence
+
+The v1.2.x hash-chain verifier is a consistency check, not cryptographic tamper-evidence. It catches an attacker who modifies an entry mid-chain (the next entry's `prevHash` disagrees), but an attacker with write access to both the JSONL file and the `.checkpoint` sidecar can truncate both and recompute a clean chain. The `.checkpoint` requires no signer identity.
+
+An HMAC-sidecar (a short tag, rolling key, server-side only, rotated with `AINONYMOUS_AUDIT_HMAC_KEY`) is tracked for v1.3. Until then, operators who need tamper-evidence in the cryptographic sense should replicate `.checkpoint` files to an append-only store (S3 Object Lock, remote syslog, git commit) so the external medium provides the evidence the current scheme does not. See `SECURITY.md` → "Audit-log truncation detection".
 
 ---
 
