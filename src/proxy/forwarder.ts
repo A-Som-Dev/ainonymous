@@ -23,11 +23,66 @@ export interface ForwardOptions {
   /** Max length of any pseudonym known to the rehydrator. Used to size the
    *  per-block sliding buffer. Callers should read this from the session map. */
   maxPseudoLen?: number;
+  /** Opt-in: release buffered text at sentence/newline boundaries early. */
+  eagerFlush?: boolean;
 }
 
 function isLocalHost(host: string): boolean {
   const bare = host.split(':')[0];
   return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+}
+
+export function forwardPassthrough(
+  opts: {
+    upstream: string;
+    method: string;
+    path: string;
+    headers: Record<string, string | string[] | undefined>;
+  },
+  clientReq: http.IncomingMessage,
+  clientRes: ServerResponse,
+): void {
+  const url = new URL(opts.path, opts.upstream);
+  if (url.protocol !== 'https:' && !isLocalHost(url.hostname)) {
+    throw new Error(
+      `forwarder refuses plain-http upstream ${url.host}. API credentials would be exposed.`,
+    );
+  }
+  const transport = url.protocol === 'https:' ? https : http;
+  const fwdHeaders: Record<string, string | string[]> = {};
+  for (const [key, val] of Object.entries(opts.headers)) {
+    if (!val) continue;
+    if (key.toLowerCase() === 'host') continue;
+    fwdHeaders[key] = val;
+  }
+  fwdHeaders['host'] = url.host;
+
+  const upstreamReq = transport.request(
+    {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: opts.method,
+      headers: fwdHeaders,
+      agent: url.protocol === 'https:' ? httpsAgent : httpAgent,
+      timeout: REQUEST_TIMEOUT_MS,
+    },
+    (upstreamRes) => {
+      clientRes.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+      upstreamRes.pipe(clientRes);
+    },
+  );
+
+  upstreamReq.on('error', (err) => {
+    log.error('passthrough upstream failed', { upstream: url.origin, err: err.message });
+    if (!clientRes.headersSent) {
+      clientRes.writeHead(502, { 'content-type': 'application/json' });
+    }
+    clientRes.end(JSON.stringify({ error: 'upstream_unreachable' }));
+  });
+
+  clientReq.on('aborted', () => upstreamReq.destroy());
+  clientReq.pipe(upstreamReq);
 }
 
 export function forwardWithRehydration(
@@ -81,7 +136,9 @@ export function forwardWithRehydration(
 
         if (opts.streamFormat) {
           const safeSuffix = Math.max(64, (opts.maxPseudoLen ?? 32) * 2 + 50);
-          const rh = new StreamRehydrator(opts.streamFormat, rehydrateFn, safeSuffix);
+          const rh = new StreamRehydrator(opts.streamFormat, rehydrateFn, safeSuffix, {
+            eagerFlush: opts.eagerFlush === true,
+          });
           let bytesIn = 0;
           proxyRes.on('data', (chunk: string) => {
             bytesIn += chunk.length;
