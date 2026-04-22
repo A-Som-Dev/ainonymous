@@ -1,3 +1,5 @@
+import { log } from './logger.js';
+
 // Greek alphabet minus the four two-character names (Mu, Nu, Xi, Pi). A
 // two-character pseudonym is a substring of common English/German words
 // `nu` inside `null`, `pi` inside `pipe`, `xi` inside `exit`, `mu` inside
@@ -37,8 +39,49 @@ function greekAt(index: number): string {
   return cycle === 0 ? name : `${name}${cycle + 1}`;
 }
 
+type CounterName =
+  | 'email'
+  | 'ipv4'
+  | 'ipv6'
+  | 'mac'
+  | 'domain'
+  | 'person'
+  | 'identifier'
+  | 'dob'
+  | 'ukNi'
+  | 'taxId'
+  | 'nhs'
+  | 'sv'
+  | 'phone'
+  | 'iban'
+  | 'creditCard'
+  | 'address'
+  | 'personalausweis'
+  | 'ssn'
+  | 'zipUs'
+  | 'passportUs'
+  | 'passportUk'
+  | 'dlUs'
+  | 'dlUk'
+  | 'postcodeUk'
+  | 'sinCa'
+  | 'tfnAu'
+  | 'medicareAu'
+  | 'aadhaar'
+  | 'pan'
+  | 'cpf'
+  | 'cnpj'
+  | 'curp'
+  | 'rfc'
+  | 'rrnKr'
+  | 'idZa'
+  | 'taxIdHu'
+  | 'pidHu'
+  | 'nikId';
+
 export class PseudoGen {
   private cache = new Map<string, string>();
+  private identitySkips = 0;
   private counters = {
     email: 0,
     ipv4: 0,
@@ -120,18 +163,46 @@ export class PseudoGen {
 
   person(original: string): string {
     return this.cached(`person:${original}`, () => {
-      const name = greekAt(this.counters.person);
+      let name = `Person ${greekAt(this.counters.person)}`;
       this.counters.person++;
-      return `Person ${name}`;
+      while (name === original) {
+        this.identitySkips++;
+        name = `Person ${greekAt(this.counters.person)}`;
+        this.counters.person++;
+      }
+      return name;
     });
   }
 
   identifier(original: string): string {
     return this.cached(`identifier:${original}`, () => {
-      const name = greekAt(this.counters.identifier);
+      let name = greekAt(this.counters.identifier);
       this.counters.identifier++;
+      while (name === original) {
+        this.identitySkips++;
+        name = greekAt(this.counters.identifier);
+        this.counters.identifier++;
+      }
       return name;
     });
+  }
+
+  identityMapSkips(): number {
+    return this.identitySkips;
+  }
+
+  /** Sets a baseline so the next generated value for `name` lands at `start`.
+   *  Used by the pipeline to reserve a non-overlapping counter block per
+   *  process when session persistence is on. Counters are 1-based in the
+   *  generator API: passing start=42 means the next bump produces index 42. */
+  seedCounter(name: CounterName, start: number): void {
+    if (!Number.isInteger(start) || start < 1) {
+      log.warn('pseudoGen: ignoring invalid counter seed', { name, start });
+      return;
+    }
+    if (this.counters[name] < start) {
+      this.counters[name] = start - 1;
+    }
   }
 
   ipv6(original: string): string {
