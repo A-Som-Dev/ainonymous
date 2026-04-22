@@ -1,6 +1,8 @@
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import type { SessionMap, LayerName } from '../types.js';
 import { PersistStore } from './persist.js';
+import { stripFormatChars } from '../patterns/normalize.js';
+import { foldConfusable } from '../patterns/confusables.js';
 
 interface EntryMeta {
   layer: LayerName;
@@ -24,22 +26,33 @@ export interface BiMapOptions {
 }
 
 const ALGO = 'aes-256-gcm';
-const SENTINELS = new Set(['***ANONYMIZED***', '***REDACTED***']);
+export const SENTINEL_PSEUDONYMS = ['***ANONYMIZED***', '***REDACTED***'] as const;
+const SENTINELS = new Set<string>(SENTINEL_PSEUDONYMS);
+const SENTINEL_SHAPE_RE = /^\*{2,}(redacted|anonymized)\*{2,}$/i;
 
 export function isSentinel(pseudonym: string): boolean {
   return SENTINELS.has(pseudonym);
+}
+
+function isSentinelShaped(s: string): boolean {
+  const stripped = stripFormatChars(s).replace(/\s+/g, '');
+  const nfkc = stripped.normalize('NFKC');
+  let folded = '';
+  for (const ch of nfkc) {
+    const cp = ch.codePointAt(0) ?? 0;
+    folded += foldConfusable(cp) ?? ch;
+  }
+  return SENTINEL_SHAPE_RE.test(folded);
 }
 
 export class BiMap implements SessionMap {
   private fwd = new Map<string, string>();
   private rev = new Map<string, EncryptedValue>();
   private meta = new Map<string, EntryMeta>();
+  private sentinelFanout = new Map<string, Set<string>>();
   private key: Buffer;
   private store: PersistStore | null = null;
-  // Snapshot of pseudonym -> decrypted original. Rebuilt lazily on first read
-  // after a mutation. Avoids the O(n) AES-GCM decrypt loop that used to run
-  // on every rehydrate() call (which touches entries() for each SSE chunk).
-  // Tradeoff: duplicates session-map footprint in cleartext. See SECURITY.md.
+  // Cleartext snapshot, rebuilt lazily after mutations (SECURITY.md tradeoff).
   private decryptedCache: Map<string, string> | null = null;
 
   constructor(opts: BiMapOptions = {}) {
@@ -53,10 +66,21 @@ export class BiMap implements SessionMap {
   }
 
   set(original: string, pseudonym: string, layer: LayerName, type: string): void {
+    if (isSentinelShaped(original)) {
+      throw new Error(`sentinel-shaped original rejected: ${JSON.stringify(original)}`);
+    }
     const hash = this.hash(original);
     if (this.fwd.has(hash)) return;
 
     const sentinel = isSentinel(pseudonym);
+    if (sentinel) {
+      let set = this.sentinelFanout.get(pseudonym);
+      if (!set) {
+        set = new Set<string>();
+        this.sentinelFanout.set(pseudonym, set);
+      }
+      set.add(hash);
+    }
 
     if (!sentinel && this.rev.has(pseudonym)) {
       const existing = this.decrypt(this.rev.get(pseudonym)!);
@@ -98,6 +122,25 @@ export class BiMap implements SessionMap {
     return this.meta.get(this.hash(original));
   }
 
+  sentinelFanoutCount(pseudonym: string): number {
+    return this.sentinelFanout.get(pseudonym)?.size ?? 0;
+  }
+
+  /** Reserves a counter range on the persist store (no-op without persist). */
+  reserveCounterBlock(name: string, size: number): { start: number; end: number } | null {
+    if (!this.store) return null;
+    return this.store.reserveCounterBlock(name, size);
+  }
+
+  /** Batch counterpart: reserves every named counter in a single transaction. */
+  reserveCounterBlocks(
+    names: readonly string[],
+    size: number,
+  ): Map<string, { start: number; end: number }> | null {
+    if (!this.store) return null;
+    return this.store.reserveCounterBlocks(names, size);
+  }
+
   entries(): Iterable<[string, string]> {
     const snapshot = this.getDecryptedSnapshot();
     const result: [string, string][] = [];
@@ -126,6 +169,7 @@ export class BiMap implements SessionMap {
     this.fwd.clear();
     this.rev.clear();
     this.meta.clear();
+    this.sentinelFanout.clear();
     this.decryptedCache = null;
     this.key = randomBytes(32);
     if (this.store) {
