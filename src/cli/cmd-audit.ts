@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import type { AuditEntry } from '../types.js';
-import { findLogFiles, verifyFile, type VerifyResult } from '../audit/verify-scan.js';
+import { findLogFiles, verifyFile, type VerifyResult, isHmacFailure } from '../audit/verify-scan.js';
 
 function readJsonlFile(path: string): AuditEntry[] {
   const content = readFileSync(path, 'utf-8');
@@ -70,7 +70,7 @@ export function registerAuditCmd(program: Command): void {
   audit
     .command('verify')
     .description(
-      'Chain-consistency check across all audit log files (not tamper-evidence authentication; HMAC-signed checkpoints deferred to v1.3, see THREAT_MODEL.md)',
+      'Chain-consistency check across all audit log files. Set AINONYMOUS_AUDIT_HMAC_KEY for HMAC tamper-evidence; see OPERATIONS.md.',
     )
     .option('--dir <path>', 'audit log directory', './ainonymous-audit')
     .option('--strict', 'require a checkpoint sidecar to exist for every log file')
@@ -137,9 +137,24 @@ export function registerAuditCmd(program: Command): void {
     .action((opts: { dir: string }) => {
       const dir = resolve(opts.dir);
       warnIfChainBroken(dir);
-      const entries = readAllEntries(dir);
+      const files = findLogFiles(dir);
+      const verifyResults = files.map((f) => verifyFile(f, false));
+      const hmacTamperedFiles = new Set(verifyResults.filter(isHmacFailure).map((r) => r.file));
 
-      if (entries.length === 0) {
+      const entries: AuditEntry[] = [];
+      const tamperImpacted: AuditEntry[] = [];
+      for (const f of files) {
+        const fileEntries = readJsonlFile(f);
+        if (hmacTamperedFiles.has(f)) {
+          for (const e of fileEntries) {
+            if (e.layer !== 'rehydration') tamperImpacted.push(e);
+          }
+          continue;
+        }
+        entries.push(...fileEntries);
+      }
+
+      if (entries.length === 0 && tamperImpacted.length === 0) {
         console.log(`No audit logs found in ${dir}`);
         return;
       }
@@ -154,10 +169,11 @@ export function registerAuditCmd(program: Command): void {
         }
       }
 
-      // Sentinel-mapped originals can never rehydrate (by design: no reverse
-      // entry in the session map). Reporting them in the same bucket as
-      // genuinely unmatched pseudos hides a systemic data-loss class, so
-      // split them out.
+      // Three outcome buckets for anonymized originals:
+      //   pending         - rehydrate expected but never happened (real miss)
+      //   sentinelOnly    - mapped to ***ANONYMIZED***, no reverse entry by design
+      //   tamperImpacted  - lives in a file whose HMAC sidecar failed verify;
+      //                     we cannot trust whether rehydrate happened or not.
       const sentinelOnly: AuditEntry[] = [];
       const pending: AuditEntry[] = [];
       for (const [hash, entry] of anonymized) {
@@ -166,7 +182,7 @@ export function registerAuditCmd(program: Command): void {
         else pending.push(entry);
       }
 
-      if (pending.length === 0 && sentinelOnly.length === 0) {
+      if (pending.length === 0 && sentinelOnly.length === 0 && tamperImpacted.length === 0) {
         console.log('No pending pseudonyms. All anonymized originals were rehydrated.');
         return;
       }
@@ -186,8 +202,23 @@ export function registerAuditCmd(program: Command): void {
         }
       }
 
+      if (tamperImpacted.length > 0) {
+        // Print counts only: an attacker with write access to the sidecar
+        // would otherwise flip a file into tamper-impacted and trigger a
+        // free dump of every original-hash in that file.
+        const filesAffected = verifyResults
+          .filter(isHmacFailure)
+          .map((r) => r.file.split(/[\\/]/).pop() ?? r.file);
+        console.log(
+          `\n[tamper-impacted] ${tamperImpacted.length} entries from ${filesAffected.length} file(s) that failed HMAC verify (run 'audit verify' to investigate, originals hidden for safety):`,
+        );
+        for (const f of filesAffected) {
+          console.log(`  ${f}`);
+        }
+      }
+
       console.log(
-        `\n${pending.length} rehydration-pending, ${sentinelOnly.length} sentinel-only of ${anonymized.size} anonymized (${rehydrated.size} rehydrated)`,
+        `\n${pending.length} rehydration-pending, ${sentinelOnly.length} sentinel-only, ${tamperImpacted.length} tamper-impacted of ${anonymized.size + tamperImpacted.length} anonymized (${rehydrated.size} rehydrated)`,
       );
     });
 
