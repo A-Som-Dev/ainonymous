@@ -86,6 +86,8 @@ export class PersistStore {
   private beginStmt: SqliteStatement;
   private commitStmt: SqliteStatement;
   private rollbackStmt: SqliteStatement;
+  private counterSelectStmt: SqliteStatement;
+  private counterUpsertStmt: SqliteStatement;
 
   constructor(path: string) {
     this.path = path;
@@ -104,6 +106,11 @@ export class PersistStore {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_pseudonym_hash ON bimap(pseudonym_hash);
+      CREATE TABLE IF NOT EXISTS counters (
+        name TEXT PRIMARY KEY,
+        value INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
 
     this.insertStmt = this.db.prepare(
@@ -122,6 +129,88 @@ export class PersistStore {
     this.beginStmt = this.db.prepare('BEGIN IMMEDIATE');
     this.commitStmt = this.db.prepare('COMMIT');
     this.rollbackStmt = this.db.prepare('ROLLBACK');
+    this.counterSelectStmt = this.db.prepare('SELECT value FROM counters WHERE name = ?');
+    this.counterUpsertStmt = this.db.prepare(
+      `INSERT INTO counters (name, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    );
+  }
+
+  /** Batch variant: reserve one range per name in a single BEGIN IMMEDIATE
+   *  transaction. Saves roughly one fsync per extra name on Windows and
+   *  amortises the lock cost over the whole counter set. */
+  reserveCounterBlocks(
+    names: readonly string[],
+    size: number,
+  ): Map<string, { start: number; end: number }> {
+    if (!Number.isInteger(size) || size <= 0) {
+      throw new Error(`reserveCounterBlocks: size must be a positive integer, got ${size}`);
+    }
+    const out = new Map<string, { start: number; end: number }>();
+    this.beginStmt.run();
+    try {
+      const now = Date.now();
+      for (const name of names) {
+        const row = this.counterSelectStmt.get(name) as { value: number | bigint } | undefined;
+        const current = row ? Number(row.value) : 0;
+        const end = current + size;
+        if (!Number.isSafeInteger(end)) {
+          throw new Error(
+            `reserveCounterBlocks: counter "${name}" would overflow Number.MAX_SAFE_INTEGER ` +
+              `(current=${current}, requested=${size}). Rotate the session DB or reset the counter.`,
+          );
+        }
+        this.counterUpsertStmt.run(name, end, now);
+        out.set(name, { start: current + 1, end });
+      }
+      this.commitStmt.run();
+      return out;
+    } catch (err) {
+      try {
+        this.rollbackStmt.run();
+      } catch (rollbackErr) {
+        log.error('reserveCounterBlocks rollback failed', {
+          reason: (rollbackErr as Error).message,
+        });
+      }
+      throw err;
+    }
+  }
+
+  /** Atomically bumps the named counter by `size` and returns the reserved
+   *  range [start, end]. Two processes sharing the same DB file always get
+   *  disjoint blocks because the BEGIN IMMEDIATE takes a write lock and the
+   *  upsert runs inside it. Counter names are free-form ASCII. */
+  reserveCounterBlock(name: string, size: number): { start: number; end: number } {
+    if (!Number.isInteger(size) || size <= 0) {
+      throw new Error(`reserveCounterBlock: size must be a positive integer, got ${size}`);
+    }
+    this.beginStmt.run();
+    try {
+      const row = this.counterSelectStmt.get(name) as { value: number | bigint } | undefined;
+      const current = row ? Number(row.value) : 0;
+      const end = current + size;
+      if (!Number.isSafeInteger(end)) {
+        throw new Error(
+          `reserveCounterBlock: counter "${name}" would overflow Number.MAX_SAFE_INTEGER ` +
+            `(current=${current}, requested=${size}). Rotate the session DB or reset the counter.`,
+        );
+      }
+      const start = current + 1;
+      this.counterUpsertStmt.run(name, end, Date.now());
+      this.commitStmt.run();
+      return { start, end };
+    } catch (err) {
+      try {
+        this.rollbackStmt.run();
+      } catch (rollbackErr) {
+        log.error('reserveCounterBlock rollback failed', {
+          name,
+          reason: (rollbackErr as Error).message,
+        });
+      }
+      throw err;
+    }
   }
 
   insert(original: string, pseudonym: string, key: Buffer, createdAt: number): void {
