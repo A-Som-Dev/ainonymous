@@ -1,4 +1,11 @@
 import { log } from '../logger.js';
+import {
+  buildAnthropicDelta,
+  anthropicDeltaKind,
+  buildOpenaiChunk,
+  buildOpenaiSyntheticContent,
+} from './stream-formats/index.js';
+import type { AnthropicDeltaKind } from './stream-formats/index.js';
 
 export type StreamFormat = 'anthropic' | 'openai';
 
@@ -6,6 +13,7 @@ type RehydrateFn = (text: string) => string;
 
 interface BlockBuf {
   pending: string;
+  kind: AnthropicDeltaKind;
 }
 
 /** Bridges chunked SSE streams and the text-based rehydrator. Pseudonyms may
@@ -17,10 +25,21 @@ interface BlockBuf {
  */
 const MAX_LEFTOVER_BYTES = 1 * 1024 * 1024;
 
+export interface StreamRehydratorOptions {
+  /** Emit text up to a sentence-like boundary (`\n`, `. `, `! `, `? `) as
+   *  soon as it is complete, instead of holding every char for safeSuffix
+   *  bytes. Trade-off: a pseudonym split across a boundary may leak through
+   *  unrehydrated. Documented as opt-in for pair-programming flows. */
+  eagerFlush?: boolean;
+}
+
+const WS_RE = /\s/;
+
 export class StreamRehydrator {
   private readonly format: StreamFormat;
   private readonly rehydrate: RehydrateFn;
   private readonly safeSuffix: number;
+  private readonly eagerFlush: boolean;
   private leftover = '';
   private readonly blocks = new Map<number, BlockBuf>();
   // OpenAI has only a single logical stream - we treat it as block index 0.
@@ -30,10 +49,16 @@ export class StreamRehydrator {
   private openaiCompletionId: string | null = null;
   private openaiModel: string | null = null;
 
-  constructor(format: StreamFormat, rehydrate: RehydrateFn, safeSuffix: number) {
+  constructor(
+    format: StreamFormat,
+    rehydrate: RehydrateFn,
+    safeSuffix: number,
+    opts: StreamRehydratorOptions = {},
+  ) {
     this.format = format;
     this.rehydrate = rehydrate;
     this.safeSuffix = Math.max(16, safeSuffix);
+    this.eagerFlush = opts.eagerFlush === true;
   }
 
   /** Accept more bytes from the upstream; returns whatever is safe to emit to
@@ -66,15 +91,16 @@ export class StreamRehydrator {
    *  Must be called once upstream signals end-of-stream. */
   flush(): string {
     let out = '';
-    // Any unterminated leftover from a truncated stream: try to process if it
-    // looks like a complete event, otherwise pass through raw so nothing is
-    // lost (caller will see an incomplete SSE tail, same as upstream sent).
+    // Unterminated leftover from a truncated stream gets a final rehydrate
+    // pass over the whole buffer. The previous `includes('data:')` branch
+    // routed through `handleEvent`, which falls back to raw passthrough on
+    // any JSON-parse failure - and a truncated chunk is by definition a
+    // parse failure. Running rehydrate over the raw bytes is safe: it only
+    // substitutes known pseudonyms, SSE control syntax passes through
+    // unchanged, and a pseudonym that landed in the last chunk still
+    // resolves back to the original instead of leaking.
     if (this.leftover.length > 0) {
-      if (this.leftover.includes('data:')) {
-        out += this.handleEvent(this.leftover);
-      } else {
-        out += this.leftover;
-      }
+      out += this.rehydrate(this.leftover);
       this.leftover = '';
     }
     for (const index of [...this.blocks.keys()]) {
@@ -121,23 +147,31 @@ export class StreamRehydrator {
     if (type === 'content_block_delta') {
       const index = numIndex(payload['index']);
       const delta = payload['delta'];
-      if (!isObj(delta) || delta['type'] !== 'text_delta') return raw;
-      const text = delta['text'];
-      if (typeof text !== 'string') return raw;
+      if (!isObj(delta)) return raw;
+      const kindInfo = anthropicDeltaKind(delta);
+      if (kindInfo === null) return raw;
+      const { kind, text } = kindInfo;
+      // input_json_delta fragments carry raw JSON syntax. Running the
+      // plain-string rehydrator on them risks producing unbalanced quotes
+      // when an original contains " or \. Forward unchanged; tool_use
+      // arguments should not carry pseudonyms in the first place.
+      if (kind === 'input_json_delta') return raw;
 
-      const emit = this.appendToBlock(index, text);
+      const emit = this.appendToBlock(index, text, kind);
       if (!emit) return ''; // fully buffered, no delta to forward yet
-      return buildAnthropicDelta(index, emit);
+      return buildAnthropicDelta(index, emit, kind);
     }
 
     if (type === 'content_block_stop') {
       const index = numIndex(payload['index']);
+      const buf = this.blocks.get(index);
+      const kind = buf?.kind ?? 'text_delta';
       const tail = this.drainBlockText(index);
       if (tail.length === 0) return raw;
       // Emit the flushed tail as its own extra delta immediately before the
       // stop event so the client sees the complete rehydrated text. The
       // original stop event is forwarded unchanged after.
-      return buildAnthropicDelta(index, tail) + raw;
+      return buildAnthropicDelta(index, tail, kind) + raw;
     }
 
     return raw;
@@ -167,7 +201,7 @@ export class StreamRehydrator {
       }
 
       anyText = true;
-      const emit = this.appendToBlock(this.openaiBlockIndex, content);
+      const emit = this.appendToBlock(this.openaiBlockIndex, content, 'text_delta');
       if (emit.length > 0) allEmptyAfterBuffer = false;
       return { ...ch, delta: { ...delta, content: emit } };
     });
@@ -195,9 +229,26 @@ export class StreamRehydrator {
 
   /** Returns the rehydrated prefix that is safe to emit now (may be empty if
    *  everything is still sitting in the suffix buffer). */
-  private appendToBlock(index: number, newText: string): string {
-    const buf = this.blocks.get(index) ?? { pending: '' };
+  private appendToBlock(index: number, newText: string, kind: AnthropicDeltaKind): string {
+    const buf: BlockBuf = this.blocks.get(index) ?? { pending: '', kind };
+    buf.kind = kind;
     const combined = buf.pending + newText;
+
+    if (this.eagerFlush && kind === 'text_delta') {
+      const cutAt = lastEagerBoundary(combined, combined.length - this.safeSuffix);
+      // Pseudonyms (IPv4 `10.0.0.1`, addresses `Beispielweg 1,`) can contain
+      // boundary characters. If a pseudonym straddles the chosen cut point,
+      // postpone the flush until the safeSuffix guarantees it is complete.
+      if (cutAt > 0) {
+        const toEmit = combined.slice(0, cutAt);
+        const rehydrated = this.rehydrate(toEmit);
+        if (rehydrated.length > 0 && !mightSplitPseudonym(rehydrated, cutAt, combined)) {
+          buf.pending = combined.slice(cutAt);
+          this.blocks.set(index, buf);
+          return rehydrated;
+        }
+      }
+    }
 
     if (combined.length <= this.safeSuffix) {
       buf.pending = combined;
@@ -224,11 +275,13 @@ export class StreamRehydrator {
   }
 
   private drainBlock(index: number, emitAsDelta: boolean): string {
+    const buf = this.blocks.get(index);
+    const kind = buf?.kind ?? 'text_delta';
     const tail = this.drainBlockText(index);
     if (tail.length === 0) return '';
     if (!emitAsDelta) return '';
     if (this.format === 'anthropic') {
-      return buildAnthropicDelta(index, tail);
+      return buildAnthropicDelta(index, tail, kind);
     }
     return buildOpenaiSyntheticContent(tail, this.openaiCompletionId, this.openaiModel);
   }
@@ -253,30 +306,33 @@ function extractDataPayload(raw: string): string | null {
   return dataLines.length === 0 ? null : dataLines.join('\n');
 }
 
-function buildAnthropicDelta(index: number, text: string): string {
-  const body = {
-    type: 'content_block_delta',
-    index,
-    delta: { type: 'text_delta', text },
-  };
-  return `event: content_block_delta\ndata: ${JSON.stringify(body)}\n\n`;
+function mightSplitPseudonym(emitted: string, cutAt: number, combined: string): boolean {
+  // Heuristic guard: if emitted text still looks like an open pseudonym token
+  // (ends with digits/alnum connected across the cut), fall back to the
+  // slow path. Conservative: may over-hold rare tokens, but never leaks.
+  if (emitted.length === 0 || cutAt >= combined.length) return false;
+  const tail = emitted.slice(-1);
+  const head = combined[cutAt];
+  return /[A-Za-z0-9.:-]/.test(tail) && /[A-Za-z0-9.:-]/.test(head);
 }
 
-function buildOpenaiChunk(payload: unknown): string {
-  return `data: ${JSON.stringify(payload)}\n\n`;
+/**
+ * Highest index i >= max(minIndex, 1) such that the text ending at position i
+ * closes a sentence-like boundary (`\n`, or `[.!?]` followed by whitespace).
+ * Returns 0 when no qualifying boundary exists in the scan window. Scanning
+ * only the trailing `combined.length - minIndex + 1` characters keeps this
+ * O(safeSuffix) per push instead of the old O(combined.length).
+ */
+function lastEagerBoundary(s: string, minIndex: number): number {
+  const start = Math.max(minIndex, 1);
+  for (let i = s.length; i >= start; i--) {
+    const c = s[i - 1];
+    if (c === '\n') return i;
+    if (i >= 2) {
+      const prev = s[i - 2];
+      if ((prev === '.' || prev === '!' || prev === '?') && WS_RE.test(c)) return i;
+    }
+  }
+  return 0;
 }
 
-function buildOpenaiSyntheticContent(
-  text: string,
-  id: string | null,
-  model: string | null,
-): string {
-  const payload: Record<string, unknown> = {
-    id: id ?? 'chatcmpl-ainonymous-flush',
-    object: 'chat.completion.chunk',
-    created: Math.floor(Date.now() / 1000),
-    choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
-  };
-  if (model) payload['model'] = model;
-  return `data: ${JSON.stringify(payload)}\n\n`;
-}
