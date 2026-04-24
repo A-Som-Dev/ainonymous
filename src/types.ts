@@ -29,6 +29,16 @@ export interface PipelineContext {
   sessionMap: SessionMap;
   config: AInonymousConfig;
   filePath?: string;
+  /** Effective or-filter chain, resolved once at pipeline construction from
+   *  built-ins + config overrides + trusted custom filters. */
+  orFilters?: readonly import('./patterns/or-filters/types.js').OrPostFilter[];
+  /** Additional DetectorPlugins registered at pipeline construction. Layer 1
+   *  and Layer 2 call these alongside the built-in detectors and merge the
+   *  hits into the existing pipeline. */
+  detectorRegistry?: import('./plugin-api/registry.js').DetectorRegistry;
+  /** Built-in detector ids the operator has asked to be dropped. Hits from
+   *  the core matchers are post-filtered by type. */
+  disabledDetectorIds?: ReadonlySet<string>;
 }
 
 export interface SessionMap {
@@ -48,6 +58,9 @@ export interface AInonymousConfig {
   code: CodeConfig;
   behavior: BehaviorConfig;
   session: SessionConfig;
+  filters?: FiltersConfig;
+  trust?: TrustConfig;
+  detectors?: DetectorsConfig;
 }
 
 export interface SessionConfig {
@@ -111,6 +124,48 @@ export interface BehaviorConfig {
    *  - high: all AST identifiers not in preserve */
   aggression: AggressionMode;
   auditFailure: AuditFailureMode;
+  /** Forward unknown paths (anything outside /v1/messages and /v1/chat/completions)
+   *  to the upstream without touching the body. Required for OAuth-subscription
+   *  clients (Claude Code Max-Plan, Cursor Pro) that hit refresh/organization
+   *  endpoints alongside the chat routes. Default false because a passthrough
+   *  path widens the scope of what a misconfigured client can leak. */
+  oauthPassthrough?: boolean;
+  streaming?: StreamingConfig;
+}
+
+export interface StreamingConfig {
+  /** Release buffered deltas at sentence-like boundaries (newline, `. `) as
+   *  soon as they appear, instead of waiting for the full sliding window to
+   *  fill. Reduces pair-programming latency but accepts a small false-negative
+   *  risk for pseudonyms that straddle a sentence boundary. Default false. */
+  eagerFlush?: boolean;
+}
+
+export interface FiltersConfig {
+  /** Ids of built-in or-filters to remove from the chain. */
+  disable?: string[];
+  /** File paths (relative to project root) that default-export an OrPostFilter
+   *  or an array thereof. Loaded only when trust.allowUnsignedLocal is true. */
+  custom?: string[];
+  /** Optional lowercase-hex SHA-256 pins keyed by entries in `custom`. A
+   *  pinned filter is rejected on content mismatch even with unsigned loads
+   *  enabled, so a checked-in trusted filter cannot be silently swapped. */
+  customPins?: Record<string, string>;
+}
+
+export interface TrustConfig {
+  /** Opt-in acknowledgement that loading unsigned local .mjs filters is OK. */
+  allowUnsignedLocal?: boolean;
+}
+
+export interface DetectorsConfig {
+  /** Built-in detector ids to remove from Layer 1/Layer 2 runs. */
+  disable?: string[];
+  /** Project-local `.mjs` modules that default-export a DetectorPlugin.
+   *  Subject to the same trust gate as custom or-filters. */
+  custom?: string[];
+  /** Optional SHA-256 pins keyed by custom path. */
+  customPins?: Record<string, string>;
 }
 
 export interface AuditEntry {
