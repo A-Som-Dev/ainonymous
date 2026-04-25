@@ -57,7 +57,7 @@ describe('auto-detect', () => {
 
   it('drops build-service style bot commit authors', () => {
     dir = mkRepo();
-    commit(dir, 'DevOps Build Service (enbw)', 'build@example.com');
+    commit(dir, 'DevOps Build Service (acme)', 'build@example.com');
     commit(dir, 'Renovate Bot', 'renovate@example.com');
     commit(dir, 'Peter Müller', 'peter@example.com');
 
@@ -261,4 +261,24 @@ describe('auto-detect', () => {
     expect(cfg.code.domainTerms).not.toContain('Management');
     expect(cfg.code.domainTerms).not.toContain('Connector');
   });
+
+  it('falls back to language "unknown" for an empty repo without source markers', () => {
+    dir = mkRepo();
+    // Directory has only .git/ - no pom, package.json, requirements, Cargo, go.mod.
+    const cfg = autoDetect(dir);
+    expect(cfg.code.language).toBe('unknown');
+  });
+
+  it.each(['aol.de', 'zoho.com', 'fastmail.com'])(
+    'treats %s as free-provider, no company derived',
+    (provider) => {
+      dir = mkRepo();
+      execFileSync('git', ['config', 'user.email', `someone@${provider}`], { cwd: dir });
+      commit(dir, 'Someone', `someone@${provider}`);
+
+      const cfg = autoDetect(dir);
+      expect(cfg.identity.company).toBe('');
+      expect(cfg.identity.domains).not.toContain(provider);
+    },
+  );
 });

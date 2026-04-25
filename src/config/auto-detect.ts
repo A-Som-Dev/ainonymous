@@ -21,6 +21,7 @@ const FREE_PROVIDERS = new Set([
   'me.com',
   'mac.com',
   'aol.com',
+  'aol.de',
   'web.de',
   'gmx.de',
   'gmx.net',
@@ -32,6 +33,8 @@ const FREE_PROVIDERS = new Set([
   'arcor.de',
   'mail.com',
   'mail.ru',
+  'zoho.com',
+  'fastmail.com',
   // pseudo-domains that don't identify a company
   'users.noreply.github.com',
   'noreply.github.com',
@@ -428,6 +431,72 @@ function detectLanguageAt(dir: string): string | null {
   return null;
 }
 
+function collectFromPyproject(dir: string, out: string[]): void {
+  const p = join(dir, 'pyproject.toml');
+  if (!existsSync(p)) return;
+  try {
+    const raw = readFileSync(p, 'utf-8');
+    // Minimal parser for `[project]\nname = "..."`. Avoids a TOML dep for a
+    // single field lookup; legitimate nested tables are ignored.
+    const match = raw.match(/^\s*name\s*=\s*["']([^"']+)["']/m);
+    if (match) pushAliasCandidates(match[1], out);
+  } catch {
+    /* ignore */
+  }
+}
+
+function collectFromSetupPy(dir: string, out: string[]): void {
+  const p = join(dir, 'setup.py');
+  if (!existsSync(p)) return;
+  try {
+    const raw = readFileSync(p, 'utf-8');
+    const match = raw.match(/name\s*=\s*["']([^"']+)["']/);
+    if (match) pushAliasCandidates(match[1], out);
+  } catch {
+    /* ignore */
+  }
+}
+
+function collectFromReadme(dir: string, out: string[]): void {
+  for (const name of ['README.md', 'README.MD', 'Readme.md', 'readme.md']) {
+    const p = join(dir, name);
+    if (!existsSync(p)) continue;
+    try {
+      const raw = readFileSync(p, 'utf-8');
+      const h1 = raw.match(/^#\s+([^\n]+)/m);
+      if (!h1) return;
+      // README titles often contain company name + tagline; only take the
+      // first word-ish token so a line like "# acme-corp internal tooling"
+      // contributes just `acme-corp`.
+      const first = h1[1].trim().split(/\s+/)[0];
+      pushAliasCandidates(first.replace(/[^\w-]/g, ''), out);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+}
+
+function collectFromGitRemote(dir: string, out: string[]): void {
+  // Route through the hardened git() wrapper so a malicious .git/config in the
+  // target repo cannot hijack this one call via fsmonitor / sshCommand tricks.
+  const url = git(dir, ['remote', 'get-url', 'origin']);
+  if (!url) return;
+  const match = url.match(/[/:]([^/:]+?)\/([^/]+?)(?:\.git)?\/?$/);
+  if (match) {
+    pushAliasCandidates(match[2], out);
+  }
+}
+
+function pushAliasCandidates(raw: string, out: string[]): void {
+  const name = raw.trim();
+  if (!name) return;
+  if (name.length > 3) out.push(name);
+  for (const part of name.split(/[-_]/)) {
+    if (part.length > 2 && part !== name) out.push(part);
+  }
+}
+
 function detectLanguage(dir: string): string {
   const rootGuess = detectLanguageAt(dir);
   if (rootGuess) return rootGuess;
@@ -484,12 +553,18 @@ function detectDomainTerms(dir: string, company: string): string[] {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (typeof pkg.name === 'string') {
         const cleaned = pkg.name.replace(/^@[^/]+\//, '');
+        if (cleaned.length > 3 && /[-_]/.test(cleaned)) candidates.push(cleaned);
         candidates.push(...cleaned.split(/[-_]/).filter((w: string) => w.length > 2));
       }
     } catch {
       /* ignore */
     }
   }
+
+  collectFromPyproject(dir, candidates);
+  collectFromSetupPy(dir, candidates);
+  collectFromReadme(dir, candidates);
+  collectFromGitRemote(dir, candidates);
 
   const seen = new Set<string>();
   const terms: string[] = [];
