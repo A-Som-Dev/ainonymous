@@ -92,6 +92,55 @@ function mergeConfig(defaults: AInonymousConfig, raw: Record<string, unknown>): 
     cfg.session = mapSessionConfig(defaults.session, raw.session as Record<string, unknown>);
   }
 
+  if (isObj(raw.filters)) {
+    const f = raw.filters as Record<string, unknown>;
+    const pins: Record<string, string> = {};
+    if (isObj(f.custom_pins)) {
+      for (const [k, v] of Object.entries(f.custom_pins as Record<string, unknown>)) {
+        if (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)) {
+          pins[k] = v;
+        } else {
+          log.warn('filters.custom_pins entry dropped (must be 64-char hex sha256)', {
+            file: k,
+          });
+        }
+      }
+    }
+    cfg.filters = {
+      disable: Array.isArray(f.disable) ? f.disable.map(String) : [],
+      custom: Array.isArray(f.custom) ? f.custom.map(String) : [],
+      customPins: Object.keys(pins).length > 0 ? pins : undefined,
+    };
+  }
+
+  if (isObj(raw.trust)) {
+    const t = raw.trust as Record<string, unknown>;
+    cfg.trust = {
+      allowUnsignedLocal: t.allow_unsigned_local === true,
+    };
+  }
+
+  if (isObj(raw.detectors)) {
+    const d = raw.detectors as Record<string, unknown>;
+    const pins: Record<string, string> = {};
+    if (isObj(d.custom_pins)) {
+      for (const [k, v] of Object.entries(d.custom_pins as Record<string, unknown>)) {
+        if (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)) {
+          pins[k] = v;
+        } else {
+          log.warn('detectors.custom_pins entry dropped (must be 64-char hex sha256)', {
+            file: k,
+          });
+        }
+      }
+    }
+    cfg.detectors = {
+      disable: Array.isArray(d.disable) ? d.disable.map(String) : [],
+      custom: Array.isArray(d.custom) ? d.custom.map(String) : [],
+      customPins: Object.keys(pins).length > 0 ? pins : undefined,
+    };
+  }
+
   return cfg;
 }
 
@@ -177,7 +226,24 @@ function mapBehaviorConfig(defaults: BehaviorConfig, raw: Record<string, unknown
     mgmtToken: typeof raw.mgmt_token === 'string' ? raw.mgmt_token : defaults.mgmtToken,
     aggression,
     auditFailure,
+    oauthPassthrough:
+      typeof raw.oauth_passthrough === 'boolean'
+        ? raw.oauth_passthrough
+        : defaults.oauthPassthrough,
+    streaming: mapStreamingConfig(defaults.streaming, raw.streaming),
   };
+}
+
+function mapStreamingConfig(
+  defaults: { eagerFlush?: boolean } | undefined,
+  raw: unknown,
+): { eagerFlush: boolean } {
+  const base = { eagerFlush: defaults?.eagerFlush === true };
+  if (!isObj(raw)) return base;
+  if (typeof (raw as { eager_flush?: unknown }).eager_flush === 'boolean') {
+    base.eagerFlush = (raw as { eager_flush: boolean }).eager_flush;
+  }
+  return base;
 }
 
 function mapUpstreamConfig(defaults: UpstreamConfig, raw: Record<string, unknown>): UpstreamConfig {

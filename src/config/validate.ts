@@ -1,6 +1,19 @@
 import type { AInonymousConfig } from '../types.js';
 
-const KNOWN_TOP_KEYS = new Set(['version', 'secrets', 'identity', 'code', 'behavior', 'session']);
+const KNOWN_TOP_KEYS = new Set([
+  'version',
+  'secrets',
+  'identity',
+  'code',
+  'behavior',
+  'session',
+  'filters',
+  'trust',
+  'detectors',
+]);
+const KNOWN_FILTERS_KEYS = new Set(['disable', 'custom', 'custom_pins']);
+const KNOWN_DETECTORS_KEYS = new Set(['disable', 'custom', 'custom_pins']);
+const KNOWN_TRUST_KEYS = new Set(['allow_unsigned_local']);
 const KNOWN_BEHAVIOR_KEYS = new Set([
   'interactive',
   'audit_log',
@@ -12,7 +25,10 @@ const KNOWN_BEHAVIOR_KEYS = new Set([
   'mgmt_token',
   'aggression',
   'audit_failure',
+  'oauth_passthrough',
+  'streaming',
 ]);
+const KNOWN_STREAMING_KEYS = new Set(['eager_flush']);
 const KNOWN_CODE_KEYS = new Set([
   'language',
   'domain_terms',
@@ -28,6 +44,30 @@ export interface ValidationIssue {
   path: string;
   message: string;
   severity: 'error' | 'warning';
+}
+
+const HEX64_RE = /^[0-9a-f]{64}$/;
+
+function validateCustomPins(value: unknown, path: string, issues: ValidationIssue[]): void {
+  if (value === undefined) return;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    issues.push({
+      path,
+      message: 'must be a mapping of "<file>": "<sha256-hex64>"',
+      severity: 'error',
+    });
+    return;
+  }
+  for (const [file, pin] of Object.entries(value as Record<string, unknown>)) {
+    const entryPath = `${path}[${JSON.stringify(file)}]`;
+    if (typeof pin !== 'string' || !HEX64_RE.test(pin)) {
+      issues.push({
+        path: entryPath,
+        message: 'pin must be a lower-case 64-char sha-256 hex string',
+        severity: 'error',
+      });
+    }
+  }
 }
 
 function findCycle(value: unknown, seen: WeakSet<object>, path: string): string | null {
@@ -66,6 +106,66 @@ export function validateRawConfig(raw: Record<string, unknown>): ValidationIssue
   for (const key of Object.keys(raw)) {
     if (!KNOWN_TOP_KEYS.has(key)) {
       issues.push({ path: key, message: 'unknown top-level field (ignored)', severity: 'warning' });
+    }
+  }
+
+  if (raw.filters && typeof raw.filters === 'object' && !Array.isArray(raw.filters)) {
+    const f = raw.filters as Record<string, unknown>;
+    for (const key of Object.keys(f)) {
+      if (!KNOWN_FILTERS_KEYS.has(key)) {
+        issues.push({
+          path: `filters.${key}`,
+          message: 'unknown field (ignored)',
+          severity: 'warning',
+        });
+      }
+    }
+    if (f.disable !== undefined && !Array.isArray(f.disable)) {
+      issues.push({ path: 'filters.disable', message: 'must be an array', severity: 'error' });
+    }
+    if (f.custom !== undefined && !Array.isArray(f.custom)) {
+      issues.push({ path: 'filters.custom', message: 'must be an array', severity: 'error' });
+    }
+    validateCustomPins(f.custom_pins, 'filters.custom_pins', issues);
+  }
+
+  if (raw.detectors && typeof raw.detectors === 'object' && !Array.isArray(raw.detectors)) {
+    const d = raw.detectors as Record<string, unknown>;
+    for (const key of Object.keys(d)) {
+      if (!KNOWN_DETECTORS_KEYS.has(key)) {
+        issues.push({
+          path: `detectors.${key}`,
+          message: 'unknown field (ignored)',
+          severity: 'warning',
+        });
+      }
+    }
+    if (d.disable !== undefined && !Array.isArray(d.disable)) {
+      issues.push({ path: 'detectors.disable', message: 'must be an array', severity: 'error' });
+    }
+    if (d.custom !== undefined && !Array.isArray(d.custom)) {
+      issues.push({ path: 'detectors.custom', message: 'must be an array', severity: 'error' });
+    }
+    validateCustomPins(d.custom_pins, 'detectors.custom_pins', issues);
+  }
+
+  if (raw.trust && typeof raw.trust === 'object' && !Array.isArray(raw.trust)) {
+    const t = raw.trust as Record<string, unknown>;
+    for (const key of Object.keys(t)) {
+      if (!KNOWN_TRUST_KEYS.has(key)) {
+        issues.push({
+          path: `trust.${key}`,
+          message: 'unknown field (ignored)',
+          severity: 'warning',
+        });
+      }
+    }
+    if (t.allow_unsigned_local !== undefined && typeof t.allow_unsigned_local !== 'boolean') {
+      issues.push({
+        path: 'trust.allow_unsigned_local',
+        message: 'must be a boolean',
+        severity: 'error',
+      });
     }
   }
 
@@ -128,6 +228,26 @@ export function validateRawConfig(raw: Record<string, unknown>): ValidationIssue
         issues.push({
           path: 'behavior.mgmt_token',
           message: 'must be at least 16 characters',
+          severity: 'error',
+        });
+      }
+    }
+
+    if (b.streaming && typeof b.streaming === 'object' && !Array.isArray(b.streaming)) {
+      const s = b.streaming as Record<string, unknown>;
+      for (const key of Object.keys(s)) {
+        if (!KNOWN_STREAMING_KEYS.has(key)) {
+          issues.push({
+            path: `behavior.streaming.${key}`,
+            message: 'unknown field (ignored)',
+            severity: 'warning',
+          });
+        }
+      }
+      if (s.eager_flush !== undefined && typeof s.eager_flush !== 'boolean') {
+        issues.push({
+          path: 'behavior.streaming.eager_flush',
+          message: 'must be a boolean',
           severity: 'error',
         });
       }

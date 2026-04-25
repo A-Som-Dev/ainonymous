@@ -82,4 +82,35 @@ describe('config loader', () => {
       expect(cfg.behavior.mgmtToken).toBeUndefined();
     });
   });
+
+  describe('duplicate-key detection', () => {
+    let dir: string | null = null;
+
+    afterEach(() => {
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+        dir = null;
+      }
+    });
+
+    function writeYaml(body: string): string {
+      const d = mkdtempSync(join(tmpdir(), 'ain-cfg-dup-'));
+      writeFileSync(join(d, '.ainonymous.yml'), body, 'utf-8');
+      return d;
+    }
+
+    it('refuses a config with duplicate top-level keys', () => {
+      dir = writeYaml(
+        'version: 1\ndetectors:\n  disable: ["a"]\ndetectors:\n  disable: ["b"]\n',
+      );
+      expect(() => loadConfig(dir!)).toThrow(/duplicate.*key|conflicting/i);
+    });
+
+    it('refuses a config with duplicate nested keys', () => {
+      dir = writeYaml(
+        'version: 1\nfilters:\n  custom: ["./a.mjs"]\n  custom: ["./b.mjs"]\n',
+      );
+      expect(() => loadConfig(dir!)).toThrow(/duplicate.*key|conflicting/i);
+    });
+  });
 });

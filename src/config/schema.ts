@@ -25,9 +25,13 @@ export const DEFAULT_CONFIG: AInonymousConfig = {
     mgmtToken: undefined,
     aggression: 'medium',
     auditFailure: 'permit',
+    oauthPassthrough: false,
+    streaming: { eagerFlush: false },
   },
   session: {
     persist: false,
     persistPath: undefined,
   },
+  filters: { disable: [], custom: [] },
+  trust: { allowUnsignedLocal: false },
 };

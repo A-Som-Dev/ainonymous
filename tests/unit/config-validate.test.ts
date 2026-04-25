@@ -104,4 +104,62 @@ describe('config validation', () => {
     const err = issues.find((i) => i.path === 'behavior.mgmt_token');
     expect(err?.severity).toBe('error');
   });
+
+  it('accepts filters.custom_pins as known field', () => {
+    const issues = validateRawConfig({
+      filters: { custom: ['./f.mjs'], custom_pins: { './f.mjs': 'a'.repeat(64) } },
+    });
+    const warn = issues.find((i) => i.path === 'filters.custom_pins');
+    expect(warn).toBeUndefined();
+  });
+
+  it('accepts detectors as known top-level field', () => {
+    const issues = validateRawConfig({
+      detectors: { custom: ['./d.mjs'] },
+    });
+    const warn = issues.find((i) => i.path === 'detectors');
+    expect(warn).toBeUndefined();
+  });
+
+  it('accepts detectors.custom_pins and detectors.disable as known fields', () => {
+    const issues = validateRawConfig({
+      detectors: { custom: ['./d.mjs'], custom_pins: { './d.mjs': 'b'.repeat(64) }, disable: ['x'] },
+    });
+    const unknown = issues.filter((i) => i.path.startsWith('detectors.'));
+    expect(unknown).toEqual([]);
+  });
+
+  it('warns about unknown detectors sub-field', () => {
+    const issues = validateRawConfig({ detectors: { mystery: 1 } });
+    const warn = issues.find((i) => i.path === 'detectors.mystery');
+    expect(warn?.severity).toBe('warning');
+  });
+
+  it('rejects filters.custom_pins that is not an object', () => {
+    const issues = validateRawConfig({ filters: { custom_pins: ['./f.mjs'] } });
+    const err = issues.find((i) => i.path === 'filters.custom_pins');
+    expect(err?.severity).toBe('error');
+  });
+
+  it('rejects filters.custom_pins value that is not a 64-char hex string', () => {
+    const issues = validateRawConfig({
+      filters: { custom_pins: { './f.mjs': 'deadbeef' } },
+    });
+    const err = issues.find((i) => i.path === 'filters.custom_pins["./f.mjs"]');
+    expect(err?.severity).toBe('error');
+    expect(err?.message).toMatch(/64.*hex|sha-?256/i);
+  });
+
+  it('rejects detectors.custom_pins that is not an object', () => {
+    const issues = validateRawConfig({ detectors: { custom_pins: 'oops' } });
+    const err = issues.find((i) => i.path === 'detectors.custom_pins');
+    expect(err?.severity).toBe('error');
+  });
+
+  it('accepts a 64-char-hex custom_pins value', () => {
+    const issues = validateRawConfig({
+      filters: { custom_pins: { './f.mjs': 'a'.repeat(64) } },
+    });
+    expect(hasErrors(issues)).toBe(false);
+  });
 });
