@@ -31,6 +31,8 @@ const PRESET_ENABLED: Record<string, Set<string>> = {
 
 export const countryIds: OrPostFilter = {
   id: 'country-ids',
+  description:
+    'Gates country-specific identifier types (SSN, SIN, Aadhaar, CPF, ...) behind a matching compliance preset.',
   accept(match, ctx) {
     if (!COUNTRY_ID_TYPES.has(match.type)) return true;
     return PRESET_ENABLED[ctx.preset]?.has(match.type) ?? false;
