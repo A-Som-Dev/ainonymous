@@ -288,12 +288,12 @@ describe('unicode bypass resistance', () => {
     expect(original).toContain('\u200B');
   });
 
-  it('does NOT fix kyrillisch/lateinisch homoglyphs (documented out of scope)', () => {
-    // 'api_key' where 'a' is kyrillisch U+0430. NFKC does not unify cyrillic and
-    // latin. This is future work via a confusables table; see SECURITY.md.
+  it('folds cyrillic/latin homoglyphs via confusables map', () => {
+    // 'api_key' with a leading Cyrillic 'а' (U+0430) must still trigger the
+    // password-assignment rule once confusables are folded to Latin baseline.
     const text = '\u0430pi_key = "sk-ant-abcdefghij1234567890"';
     const hits = matchSecrets(text);
     const pw = hits.filter((h) => h.type === 'password');
-    expect(pw).toHaveLength(0);
+    expect(pw.length).toBeGreaterThan(0);
   });
 });

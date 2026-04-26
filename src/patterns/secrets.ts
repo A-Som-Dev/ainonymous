@@ -255,12 +255,15 @@ export function matchSecrets(input: string): PatternMatch[] {
   return runPatterns(input, SECRET_PATTERNS);
 }
 
-export async function matchSecretsEnhanced(input: string): Promise<PatternMatch[]> {
+export async function matchSecretsEnhanced(
+  input: string,
+  opts?: { filters?: readonly import('./or-filters/types.js').OrPostFilter[] },
+): Promise<PatternMatch[]> {
   const local = matchSecrets(input);
 
   let orHits: PatternMatch[];
   try {
-    const all = await detectWithOpenRedaction(input);
+    const all = await detectWithOpenRedaction(input, { filters: opts?.filters as never });
     orHits = all.filter((h) => isSecretType(h.type));
   } catch (err) {
     if (process.env.DEBUG) console.warn('[ainonymous] openredaction error:', err);

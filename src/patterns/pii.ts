@@ -138,12 +138,19 @@ export function matchPII(input: string): PatternMatch[] {
   return runPatterns(input, PII_PATTERNS);
 }
 
-export async function matchPIIEnhanced(input: string, preset?: string): Promise<PatternMatch[]> {
+export async function matchPIIEnhanced(
+  input: string,
+  preset?: string,
+  opts?: { filters?: readonly import('./or-filters/types.js').OrPostFilter[] },
+): Promise<PatternMatch[]> {
   const local = matchPII(input);
 
   let orHits: PatternMatch[];
   try {
-    const all = await detectWithOpenRedaction(input, { preset });
+    const all = await detectWithOpenRedaction(input, {
+      preset,
+      filters: opts?.filters as never,
+    });
     orHits = all.filter((h) => isPIIType(h.type));
   } catch (err) {
     if (process.env.DEBUG) console.warn('[ainonymous] openredaction error:', err);
