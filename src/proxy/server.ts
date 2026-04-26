@@ -5,9 +5,11 @@ import { Pipeline } from '../pipeline/pipeline.js';
 import { AuditLogger } from '../audit/logger.js';
 import { serveDashboard, serveDashboardAsset, serveSSE } from '../audit/dashboard.js';
 import { collectBody, parseRequest, replaceTextInJson, detectApiFormat } from './interceptor.js';
-import { forwardWithRehydration } from './forwarder.js';
+import { forwardWithRehydration, forwardPassthrough } from './forwarder.js';
 import { anonymizeHeaders } from './header-anonymizer.js';
-import { scanAuditDir } from '../audit/verify-scan.js';
+import { scanAuditDir, isHmacFailure } from '../audit/verify-scan.js';
+import { resolveAuditHmacKeyring, resolveActiveHmacKid } from '../audit/logger.js';
+import { SENTINEL_PSEUDONYMS } from '../session/map.js';
 import { basename } from 'node:path';
 import { log } from '../logger.js';
 
@@ -95,11 +97,16 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
     auditLogger.enablePersistence(dir, opts.config.behavior.auditFailure);
   }
 
+  const keyring = resolveAuditHmacKeyring();
+  const activeKid = keyring ? resolveActiveHmacKid(keyring) : null;
   log.info('audit_posture', {
     audit_log: opts.config.behavior.auditLog,
     audit_failure: opts.config.behavior.auditFailure,
     audit_dir: opts.config.behavior.auditDir || './ainonymous-audit',
     compliance: opts.config.behavior.compliance ?? 'none',
+    hmac_enabled: keyring !== null,
+    hmac_kid: activeKid,
+    hmac_kids_available: keyring ? [...keyring.keys()].sort() : [],
   });
 
   const pipeline = opts.pipeline ?? new Pipeline(opts.config, auditLogger);
@@ -143,10 +150,9 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
       const format = detectApiFormat(parsed.body, path);
       const upstream = pickUpstream(format);
 
-      // Track every pseudonym actually emitted while anonymising this
-      // request. The rehydrate pass is then restricted to exactly that set,
-      // so a malicious upstream cannot echo unrelated pseudos back to probe
-      // the session map (RT-Oracle attack).
+      // Restrict the rehydrate pass to pseudos actually emitted on this
+      // request, so a malicious upstream cannot probe the session map by
+      // echoing arbitrary pseudos back.
       const usedPseudos = new Set<string>();
       const anonymizedBody = await replaceTextInJson(parsed.body, async (text) => {
         const result = await pipeline.anonymize(text);
@@ -167,6 +173,7 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
           body: outBody,
           streamFormat,
           maxPseudoLen: pipeline.getSessionMap().getMaxPseudonymLength(),
+          eagerFlush: opts.config.behavior.streaming?.eagerFlush === true,
         },
         res,
         (chunk) => pipeline.rehydrate(chunk, { allowedPseudonyms: usedPseudos }),
@@ -212,6 +219,8 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
       const auditDir = opts.config.behavior.auditDir || './ainonymous-audit';
       const scan = scanAuditDir(auditDir);
       const brokenFiles = scan.filter((r) => r.status !== 'ok');
+      const sessionMap = pipeline.getSessionMap();
+      const pseudoGen = pipeline.getPseudoGen();
       const lines = [
         '# HELP ainonymous_uptime_seconds Proxy uptime',
         '# TYPE ainonymous_uptime_seconds gauge',
@@ -221,16 +230,28 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
         `ainonymous_requests_total ${stats.requestCount}`,
         '# HELP ainonymous_session_map_size Current session map entries',
         '# TYPE ainonymous_session_map_size gauge',
-        `ainonymous_session_map_size ${pipeline.getSessionMap().size}`,
+        `ainonymous_session_map_size ${sessionMap.size}`,
         '# HELP ainonymous_replacements_total Audit log entries by layer',
         '# TYPE ainonymous_replacements_total counter',
         `ainonymous_replacements_total{layer="secrets"} ${auditStats.secrets}`,
         `ainonymous_replacements_total{layer="identity"} ${auditStats.identity}`,
         `ainonymous_replacements_total{layer="code"} ${auditStats.code}`,
         `ainonymous_replacements_total{layer="rehydration"} ${auditStats.rehydrated}`,
+        '# HELP ainonymous_identity_map_skips_total Identity-map collisions avoided by PseudoGen',
+        '# TYPE ainonymous_identity_map_skips_total counter',
+        `ainonymous_identity_map_skips_total ${pseudoGen.identityMapSkips()}`,
+        '# HELP ainonymous_sentinel_fanout Distinct originals that collapsed onto a sentinel pseudonym',
+        '# TYPE ainonymous_sentinel_fanout gauge',
+      ];
+      for (const sentinel of SENTINEL_PSEUDONYMS) {
+        lines.push(
+          `ainonymous_sentinel_fanout{pseudonym="${sentinel}"} ${sessionMap.sentinelFanoutCount(sentinel)}`,
+        );
+      }
+      lines.push(
         '# HELP ainonymous_audit_chain_broken Per-file audit chain status (1 = tampered or missing checkpoint)',
         '# TYPE ainonymous_audit_chain_broken gauge',
-      ];
+      );
       for (const res of scan) {
         const val = res.status === 'ok' ? 0 : 1;
         lines.push(`ainonymous_audit_chain_broken{file="${basename(res.file)}"} ${val}`);
@@ -240,19 +261,33 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
         '# TYPE ainonymous_audit_chain_broken_total counter',
         `ainonymous_audit_chain_broken_total ${brokenFiles.length}`,
       );
+      const hmacFailures = scan.filter(isHmacFailure).length;
+      lines.push(
+        '# HELP ainonymous_audit_hmac_verify_failures_total Files with HMAC sidecar mismatches',
+        '# TYPE ainonymous_audit_hmac_verify_failures_total counter',
+        `ainonymous_audit_hmac_verify_failures_total ${hmacFailures}`,
+      );
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       res.end(lines.join('\n') + '\n');
       return;
     }
 
     if (path === '/metrics/json') {
+      const sessionMap = pipeline.getSessionMap();
+      const pseudoGen = pipeline.getPseudoGen();
+      const fanout: Record<string, number> = {};
+      for (const sentinel of SENTINEL_PSEUDONYMS) {
+        fanout[sentinel] = sessionMap.sentinelFanoutCount(sentinel);
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
           uptime_ms: Date.now() - stats.startedAt,
           requests_total: stats.requestCount,
-          session_map_size: pipeline.getSessionMap().size,
+          session_map_size: sessionMap.size,
           audit: auditLogger.stats(),
+          identity_map_skips: pseudoGen.identityMapSkips(),
+          sentinel_fanout: fanout,
         }),
       );
       return;
@@ -294,6 +329,28 @@ export function createProxyServer(opts: ProxyServerOptions): ProxyServer {
 
     if (path.startsWith('/v1/messages') || path.startsWith('/v1/chat/completions')) {
       await handleApiRequest(req, res, path);
+      return;
+    }
+
+    if (opts.config.behavior.oauthPassthrough === true && path.startsWith('/')) {
+      const format: ApiFormat = path.includes('openai') ? 'openai' : 'anthropic';
+      const upstream = pickUpstream(format);
+      try {
+        forwardPassthrough(
+          { upstream, method: req.method ?? 'GET', path: rawUrl, headers: req.headers },
+          req,
+          res,
+        );
+      } catch (err) {
+        log.error('passthrough failed', {
+          path,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        if (!res.headersSent) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+        }
+        res.end(JSON.stringify({ error: 'passthrough_error' }));
+      }
       return;
     }
 

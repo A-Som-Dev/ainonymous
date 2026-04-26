@@ -37,6 +37,45 @@ describe('proxy server boot log', () => {
     expect(joined).toMatch(/"audit_log":true/);
   });
 
+  it('posture reports hmac_enabled=true when AINONYMOUS_AUDIT_HMAC_KEY is set', () => {
+    writes.length = 0;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8'));
+      return true;
+    }) as typeof process.stdout.write;
+    const prev = process.env['AINONYMOUS_AUDIT_HMAC_KEY'];
+    process.env['AINONYMOUS_AUDIT_HMAC_KEY'] = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    try {
+      const config = getDefaults();
+      server = createProxyServer({ config });
+      const joined = writes.join('');
+      expect(joined).toMatch(/"hmac_enabled":true/);
+      expect(joined).toMatch(/"hmac_kid":"default"/);
+    } finally {
+      if (prev === undefined) delete process.env['AINONYMOUS_AUDIT_HMAC_KEY'];
+      else process.env['AINONYMOUS_AUDIT_HMAC_KEY'] = prev;
+    }
+  });
+
+  it('posture reports hmac_enabled=false when env key is absent', () => {
+    writes.length = 0;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8'));
+      return true;
+    }) as typeof process.stdout.write;
+    const prev = process.env['AINONYMOUS_AUDIT_HMAC_KEY'];
+    delete process.env['AINONYMOUS_AUDIT_HMAC_KEY'];
+    try {
+      const config = getDefaults();
+      server = createProxyServer({ config });
+      const joined = writes.join('');
+      expect(joined).toMatch(/"hmac_enabled":false/);
+      expect(joined).toMatch(/"hmac_kid":null/);
+    } finally {
+      if (prev !== undefined) process.env['AINONYMOUS_AUDIT_HMAC_KEY'] = prev;
+    }
+  });
+
   it('reports compliance=none when the preset is unset', () => {
     writes.length = 0;
     process.stdout.write = ((chunk: string | Uint8Array) => {
