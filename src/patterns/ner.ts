@@ -1617,9 +1617,13 @@ export function detectNames(text: string, opts?: DetectOptions): NameMatch[] {
   const raw = detectNamesOn(norm.normalized, opts);
   return raw.map((h) => {
     const m = mapMatchToOriginal(norm, h.offset, h.length);
+    // name comes from the normalized slice so the SessionMap key stays stable
+    // when the same person reappears later as a clean repeat without ZWS
+    // injection. offset/length still reference original text so the in-place
+    // replacement correctly excises the ZWS-bearing region.
     return {
       ...h,
-      name: text.slice(m.start, m.start + m.length),
+      name: norm.normalized.slice(h.offset, h.offset + h.length),
       offset: m.start,
       length: m.length,
     };
@@ -1650,20 +1654,26 @@ function normalizeForNer(original: string): ReturnType<typeof normalizeForDetect
   return { normalized: out.join(''), originalPos: pos };
 }
 
-function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
-  const hits: NameMatch[] = [];
-  const coveredRanges: Array<[number, number]> = [];
+interface StageAccumulator {
+  hits: NameMatch[];
+  covered: Array<[number, number]>;
+}
 
-  function isAlreadyCovered(offset: number, length: number): boolean {
-    return coveredRanges.some(([s, e]) => offset >= s && offset + length <= e);
-  }
+function isAlreadyCovered(
+  covered: Array<[number, number]>,
+  offset: number,
+  length: number,
+): boolean {
+  return covered.some(([s, e]) => offset >= s && offset + length <= e);
+}
 
-  function markCovered(offset: number, length: number): void {
-    coveredRanges.push([offset, offset + length]);
-  }
+function markCovered(covered: Array<[number, number]>, offset: number, length: number): void {
+  covered.push([offset, offset + length]);
+}
 
-  // Pass 1: context-triggered names (high confidence).
-  // Look for names preceded by explicit markers like "Herr", "Dr.", "Author:", etc.
+export function runPrefixTriggerStage(text: string, acc: StageAccumulator): void {
+  const { hits } = acc;
+  const covered = acc.covered;
   for (const prefixRe of NAME_PREFIXES) {
     const re = new RegExp(prefixRe.source, prefixRe.flags);
     let pm: RegExpExecArray | null;
@@ -1722,20 +1732,20 @@ function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
       // trimmed tail with lower confidence. Otherwise "Kontakt: Hans Delta
       // Runner" produces both "Hans@0.9" (Pass 1 trimmed) and
       // "Hans Delta Runner@0.85" (Pass 2 full-range).
-      markCovered(nameOffset, originalLength);
+      markCovered(covered, nameOffset, originalLength);
     }
   }
+}
 
-  // Pass 2: dictionary-matched full names (medium-high confidence).
-  // Match "Firstname Lastname" pairs where both parts are in dictionaries.
+export function runDictionaryMatchStage(text: string, acc: StageAccumulator): void {
+  const { hits, covered } = acc;
   const fullRe = new RegExp(FULL_NAME_RE.source, FULL_NAME_RE.flags);
   let fm: RegExpExecArray | null;
-
   while ((fm = fullRe.exec(text)) !== null) {
     const fullMatch = fm[0];
     const offset = fm.index;
 
-    if (isAlreadyCovered(offset, fullMatch.length)) continue;
+    if (isAlreadyCovered(covered, offset, fullMatch.length)) continue;
     if (looksLikeCamelCase(text, offset)) continue;
     if (isInsideCodeBlock(text, offset)) continue;
 
@@ -1771,7 +1781,7 @@ function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
     if (!firstOk && !lastOk) continue;
 
     hits.push({ name: fullMatch, offset, length: fullMatch.length, confidence });
-    markCovered(offset, fullMatch.length);
+    markCovered(covered, offset, fullMatch.length);
 
     // Reset regex index to right after first word to catch overlapping patterns.
     // +1 skips the whitespace separator between first name and last name so the
@@ -1787,7 +1797,7 @@ function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
   while ((pm2 = pairRe.exec(text)) !== null) {
     const pairMatch = pm2[0];
     const offset = pm2.index;
-    if (isAlreadyCovered(offset, pairMatch.length)) {
+    if (isAlreadyCovered(covered, offset, pairMatch.length)) {
       pairRe.lastIndex = offset + pm2[1].length + 1;
       continue;
     }
@@ -1819,60 +1829,55 @@ function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
       continue;
     }
     hits.push({ name: pairMatch, offset, length: pairMatch.length, confidence });
-    markCovered(offset, pairMatch.length);
+    markCovered(covered, offset, pairMatch.length);
     pairRe.lastIndex = offset + first.length + 1;
   }
+}
 
-  // Pass 3: embedded names inside camelCase / PascalCase identifiers.
-  // Always runs. the prior `skipIdentifierScan` opt-out for aggression=low
-  // let every `getHunterMuellerData` / `processArturSommerOrder` through.
-  // Ignore BLOCKLIST for Pass 3: a word like `Hunter` as part of an
-  // identifier is overwhelmingly a person, not the tech term.
-  {
-    const identifierRe = /\b[A-Za-z][A-Za-z0-9_-]{5,}[A-Za-z0-9]\b/g;
-    let im: RegExpExecArray | null;
-    while ((im = identifierRe.exec(text)) !== null) {
-      const id = im[0];
-      if (!/[a-z][A-Z]/.test(id) && !/[A-Z][a-z]+[A-Z]/.test(id) && !/[_-]/.test(id)) continue;
+export function runCamelCaseSplitStage(text: string, acc: StageAccumulator): void {
+  const { hits, covered } = acc;
+  const identifierRe = /\b[A-Za-z][A-Za-z0-9_-]{5,}[A-Za-z0-9]\b/g;
+  let im: RegExpExecArray | null;
+  while ((im = identifierRe.exec(text)) !== null) {
+    const id = im[0];
+    if (!/[a-z][A-Z]/.test(id) && !/[A-Z][a-z]+[A-Z]/.test(id) && !/[_-]/.test(id)) continue;
 
-      const parts = splitIdentifier(id);
-      if (parts.length < 2) continue;
+    const parts = splitIdentifier(id);
+    if (parts.length < 2) continue;
 
-      const cap = (s: string): string => (s[0] ? s[0].toUpperCase() + s.slice(1) : s);
-      let matched = false;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const rawA = parts[i];
-        const rawB = parts[i + 1];
-        if (
-          PROGRAMMING_NOUNS.has(rawA.toLowerCase()) ||
-          PROGRAMMING_NOUNS.has(rawB.toLowerCase())
-        ) {
-          continue;
-        }
-        const a = cap(rawA);
-        const b = cap(rawB);
-        if (
-          (isFirstName(a, true) && (isLastName(b, true) || hasLastNameSuffix(b))) ||
-          (isFirstName(b, true) && (isLastName(a, true) || hasLastNameSuffix(a)))
-        ) {
-          matched = true;
-          break;
-        }
+    const cap = (s: string): string => (s[0] ? s[0].toUpperCase() + s.slice(1) : s);
+    let matched = false;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const rawA = parts[i];
+      const rawB = parts[i + 1];
+      if (
+        PROGRAMMING_NOUNS.has(rawA.toLowerCase()) ||
+        PROGRAMMING_NOUNS.has(rawB.toLowerCase())
+      ) {
+        continue;
       }
-      if (!matched) continue;
-
-      const offset = im.index;
-      if (isAlreadyCovered(offset, id.length)) continue;
-
-      hits.push({ name: id, offset, length: id.length, confidence: 0.75 });
-      markCovered(offset, id.length);
+      const a = cap(rawA);
+      const b = cap(rawB);
+      if (
+        (isFirstName(a, true) && (isLastName(b, true) || hasLastNameSuffix(b))) ||
+        (isFirstName(b, true) && (isLastName(a, true) || hasLastNameSuffix(a)))
+      ) {
+        matched = true;
+        break;
+      }
     }
-  }
+    if (!matched) continue;
 
-  // Pass 4: standalone non-latin script runs. Confidence 0.55 because this
-  // will overmatch on foreign-language code comments, but pseudonymizing them
-  // is harmless (replacement is generic) and the alternative is leaking CJK /
-  // Korean / Arabic names that never carry a western context prefix.
+    const offset = im.index;
+    if (isAlreadyCovered(covered, offset, id.length)) continue;
+
+    hits.push({ name: id, offset, length: id.length, confidence: 0.75 });
+    markCovered(covered, offset, id.length);
+  }
+}
+
+export function runNonLatinRunStage(text: string, acc: StageAccumulator): void {
+  const { hits, covered } = acc;
   for (const re of [
     HAN_RUN_RE,
     HANGUL_RUN_RE,
@@ -1891,13 +1896,24 @@ function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
       if (!name) continue;
       const offset = m.index + (m[1].length - name.length > 0 ? m[1].indexOf(name) : 0);
       const len = name.length;
-      if (isAlreadyCovered(offset, len)) continue;
+      if (isAlreadyCovered(covered, offset, len)) continue;
       if (isInsideCodeBlock(text, offset)) continue;
       hits.push({ name, offset, length: len, confidence: 0.55 });
-      markCovered(offset, len);
+      markCovered(covered, offset, len);
     }
   }
+}
 
-  hits.sort((a, b) => a.offset - b.offset);
-  return hits;
+export function runAggregateStage(acc: StageAccumulator): NameMatch[] {
+  acc.hits.sort((a, b) => a.offset - b.offset);
+  return acc.hits;
+}
+
+function detectNamesOn(text: string, _opts?: DetectOptions): NameMatch[] {
+  const acc: StageAccumulator = { hits: [], covered: [] };
+  runPrefixTriggerStage(text, acc);
+  runDictionaryMatchStage(text, acc);
+  runCamelCaseSplitStage(text, acc);
+  runNonLatinRunStage(text, acc);
+  return runAggregateStage(acc);
 }
