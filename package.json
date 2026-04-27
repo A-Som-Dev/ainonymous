@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./plugin-api": {
+      "import": "./dist/plugin-api/index.js",
+      "types": "./dist/plugin-api/index.d.ts"
     }
   },
   "files": [
@@ -18,7 +22,8 @@
     "README.md",
     "SECURITY.md",
     "THREAT_MODEL.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "sbom.cdx.json"
   ],
   "bin": {
     "ainonymous": "dist/cli/index.js"
@@ -32,6 +37,9 @@
     "lint": "eslint src/ tests/",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "check": "tsc --noEmit && eslint src/ tests/",
+    "sbom:regen": "npx --yes @cyclonedx/cyclonedx-npm@4.2.1 --output-file sbom.cdx.json",
+    "sbom:check": "node scripts/check-sbom-freshness.mjs",
+    "prepack": "npm run sbom:regen && npm run sbom:check",
     "prepublishOnly": "npm run check && npm run build && npm test"
   },
   "keywords": [
@@ -81,7 +89,7 @@
     "js-yaml": "^4.1.1",
     "openredaction": "1.1.2",
     "tree-sitter-wasms": "0.1.13",
-    "web-tree-sitter": "0.20.8"
+    "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
