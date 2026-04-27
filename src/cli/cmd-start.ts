@@ -4,11 +4,15 @@ import { spawn } from 'node:child_process';
 import type { Command } from 'commander';
 import { loadConfig } from '../config/loader.js';
 import { createProxyServer } from '../proxy/server.js';
+import { Pipeline } from '../pipeline/pipeline.js';
+import { AuditLogger } from '../audit/logger.js';
 import { listenWithFallback } from './listen-with-fallback.js';
 import { getTokenPath, ensureTokenDir, hardenTokenFileAcl } from './token-path.js';
+import { assertSafeBrowserUrl } from './safe-browser-url.js';
 import { log } from '../logger.js';
 
 async function openInBrowser(url: string): Promise<void> {
+  assertSafeBrowserUrl(url);
   const platform = process.platform;
   const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
   const args = platform === 'win32' ? ['/c', 'start', '""', url] : [url];
@@ -58,7 +62,15 @@ export function registerStartCmd(program: Command): void {
       if (!preConfigured) {
         config.behavior.mgmtToken = randomBytes(24).toString('hex');
       }
-      const server = createProxyServer({ config });
+      const logger = new AuditLogger();
+      const pipeline = new Pipeline(config, logger);
+      try {
+        await pipeline.loadConfiguredCustomFilters(opts.dir);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      const server = createProxyServer({ config, logger, pipeline });
 
       try {
         const actualPort = explicit
@@ -103,7 +115,7 @@ export function registerStartCmd(program: Command): void {
 
         const url = `http://127.0.0.1:${actualPort}`;
         const dashTokenParam = config.behavior.mgmtToken
-          ? `?token=${config.behavior.mgmtToken}`
+          ? `?token=${encodeURIComponent(config.behavior.mgmtToken)}`
           : '';
         const dashboardUrl = `${url}/dashboard${dashTokenParam}`;
         console.log(`AInonymous proxy running on ${url}`);
