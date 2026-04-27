@@ -4,9 +4,11 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.2.x   | Yes       |
-| 1.1.x   | No (upgrade to 1.2.x) |
-| 1.0.x   | No (unpublished; use `ainonymous@1.2.x`) |
+| 1.4.x   | Yes       |
+| 1.3.x   | Yes (until 1.5.x) |
+| 1.2.x   | No (upgrade to 1.4.x) |
+| 1.1.x   | No (upgrade to 1.4.x) |
+| 1.0.x   | No (unpublished; use `ainonymous@1.4.x`) |
 
 ## Reporting a Vulnerability
 
@@ -28,6 +30,35 @@ Out of scope:
 - Attacks requiring local system access (the proxy runs locally by design)
 - Denial of service on the local proxy
 - Issues in upstream LLM APIs
+
+## Custom Filter Trust Model
+
+v1.3 lets operators plug project-local `.mjs` modules into the OrPostFilter
+chain via `filters.custom: ['./path.mjs']`. Those modules run **in the proxy
+process** and see every detection match before it reaches the sentinel. The
+trust gate is `trust.allow_unsigned_local`.
+
+- Default `trust.allow_unsigned_local: false`. The loader throws
+  `UnsignedFilterError` on any listed path. This is the safe default.
+- Set `trust.allow_unsigned_local: true` only after a code review. A
+  malicious filter can `import('node:child_process')` and exfiltrate
+  anything on the machine. The gate is a binary trust opt-in; it is not a
+  sandbox. Future v2.1 work (ADR-014 Worker-Thread isolation,
+  Sigstore-cosign verification) will narrow the surface.
+- Current v1.3 integrity checks: path existence, absolute-or-relative-to
+  project, ESM default-export shape (`id`, `accept` function), and a warn
+  when a custom id shadows a disabled built-in. There is **no SHA-256 pin,
+  no signature verification, no file-hash locking**. Treat
+  `filters.custom` as a local-dev convenience, not a distribution channel.
+- When running inside CI or a shared build host, leave
+  `allow_unsigned_local: false`. A compromised `.ainonymous.yml` cannot
+  escalate to code execution without the flag.
+- `ainonymous filters validate <path>` bypasses the trust gate
+  intentionally to support dry-run checks; do not use it as a load path.
+
+Enterprise lockdown recommendation: pin `trust.allow_unsigned_local: false`
+in a baseline `.ainonymous.yml` checked into the ops repo and enforce with
+config-diff monitoring.
 
 ## Security Design
 
@@ -102,7 +133,7 @@ The tarball on the GitHub Release and the tarball on the npm registry both come 
 Install cosign (`brew install cosign`, `apt install cosign`, or grab a binary from [sigstore/cosign releases](https://github.com/sigstore/cosign/releases)), download the tarball plus its `.sigstore.json` from the Release page, then:
 
 ```bash
-VERSION=1.2.2   # replace with the version you downloaded
+VERSION=1.3.0   # replace with the version you downloaded
 
 cosign verify-blob "ainonymous-${VERSION}.tgz" \
   --bundle "ainonymous-${VERSION}.tgz.sigstore.json" \
@@ -146,7 +177,7 @@ Since v1.2.2 the release workflow has been reordered (publish-before-sign) and a
 
 To verify: fetch the Rekor entry with `cosign tree ainonymous@1.2.0` and note two entries. The one that does NOT correspond to the npm-published sha512 is the orphan. The signer identity (GitHub Actions OIDC from this repository) is the same on both. Consumers of `npm install ainonymous@1.2.0` only ever see the published, `npm audit signatures`-verifiable one.
 
-If you find additional orphans that are not in this table, please report them via the SECURITY contact — they indicate either a new bypass of the v1.2.2 gates or a signer-identity theft.
+If you find additional orphans that are not in this table, please report them via the SECURITY contact. They indicate either a new bypass of the v1.2.2 gates or a signer-identity theft.
 
 ## Session Map Persistence (opt-in)
 
@@ -169,7 +200,32 @@ When in doubt: leave `session.persist: false`. The feature exists for continuity
 
 **Audit-log truncation detection.** The hash chain alone stays internally consistent when an attacker with write access removes the tail of a `ainonymous-audit-YYYY-MM-DD.jsonl` file. Since v1.2 a sidecar `<file>.checkpoint` is written after every entry with `{lastSeq, lastHash}`. `verifyAuditChain(lines, expected)` takes the checkpoint as a required second input and reports tampering when the tail of the file no longer matches. Operators that script audit verification must pass `expected: 'required'` (or the parsed checkpoint) rather than the optional-mode default, otherwise a concurrent delete of both the JSONL tail and the checkpoint would still verify clean.
 
-The verifier is a **chain-consistency check**, not a tamper-evidence authentication in the cryptographic sense. An attacker with write access to both the JSONL file and the `.checkpoint` can truncate both and compute a self-consistent chain. HMAC-signed checkpoints are tracked for v1.3 (see THREAT_MODEL.md). Until then, replicate `.checkpoint` files to an append-only store (S3 Object Lock, remote syslog, a git-backed archive) so external storage provides the tamper evidence the current scheme does not.
+The chain-check alone is a **consistency** check, not cryptographic tamper-evidence. An attacker with write access to both the JSONL file and the `.checkpoint` can truncate both and compute a self-consistent chain. From v1.3.0 onwards set `AINONYMOUS_AUDIT_HMAC_KEY` (base64-encoded 32-byte key) to enable an HMAC-Sidecar: the logger writes a parallel `.jsonl.hmac` file and `audit verify` cross-checks it. Key management stays with the operator; see `OPERATIONS.md` for the runbook. If HMAC is not available, replicate `.checkpoint` files to an append-only external store so the external medium provides the evidence.
+
+**Replay-defense layers (RT-02 mitigation).** v1.3.0 stacks four checks against an attacker who has obtained write access to the audit directory:
+
+1. **Checkpoint MAC v=2** binds `{ckpt-blob, seq, file-basename}`. v=1 sidecars are refused outright; cross-file replay (sidecar copied from a sibling jsonl) breaks the basename binding.
+2. **JSONL tail-seq compare** runs even without HMAC. `seedFromCheckpoint` refuses if `checkpoint.lastSeq` is behind the actual jsonl tail (same-file rollback) or if the tail is unparseable (treated as tamper-evidence).
+3. **External watermark** lives in `$AINONYMOUS_STATE_HOME/audit-state/<first-32-hex-chars-of-sha256(audit_dir)>.json` (default `~/.ainonymous`), MAC-bound to `{v, audit_dir, max_seq, last_hash}`. Atomic 3-tuple rollback (jsonl + ckpt + ckpt.hmac) is detected because the watermark stays at the higher seq. The watermark is written via write-then-rename to avoid torn-file false negatives. `seedFromCheckpoint` also refuses unconditionally if the watermark is missing while a checkpoint exists (deletion attack), and refuses if the watermark JSON is unparseable (treated as tamper-evidence). The earlier `lastSeq>0` shortcut was removed in commit `e030133` to close the keyless `lastSeq=0` forge bypass.
+4. **Strict env scope.** `AINONYMOUS_AUDIT_NO_WATERMARK=1` only gates the *write* side (for tests / ephemeral runs). The read-side verification runs unconditionally so a single env flag cannot silently disable the defense in production. **Operator footgun**: a process that ran with `NO_WATERMARK=1` and then restarts without it will refuse to seed (the watermark is now genuinely missing, and the read side cannot tell that apart from a deletion attack). Either keep the env consistent across the lifetime of an audit directory or run `audit verify --reset-watermark` after a deliberate clean state. The logger emits a one-shot NOTICE at the first skipped write so the situation is visible.
+
+**Known limitation - 4-tuple atomic rollback (keyless mode).** Without `AINONYMOUS_AUDIT_HMAC_KEY` the watermark itself is written without a MAC. A dual-write attacker (audit_dir + state-home) can stage any of three equivalent attacks: (1) delete the watermark and forge a `lastSeq=0` checkpoint, (2) forge a fake jsonl + matching checkpoint + matching watermark with `max_seq=0`, or (3) roll back all four artefacts atomically. The startup banner makes this explicit: "keyless mode is advisory only; configure the HMAC key for full RT-02 mitigation." Operators that need replay defense in a dual-write threat model **must** configure HMAC.
+
+The HMAC mode catches all three: the checkpoint MAC v=2 binds blob+seq+filename, the watermark MAC binds `{v, audit_dir, max_seq, last_hash}`, and a watermark written without a `kid+mac` while a key is configured triggers the "watermark missing signature while HMAC is configured" refuse path.
+
+A principal who can write to both the audit directory **and** the watermark store **and** controls the HMAC key is outside the threat model - the key is the trust anchor. Mitigations that ship in this release are defense-in-depth, not a hard barrier:
+
+- Run the proxy as a dedicated service user with read-only access to the watermark store.
+- Place `$AINONYMOUS_STATE_HOME` on a filesystem that supports append-only flags (`chattr +a` on ext4, `chflags uappnd` on BSD/macOS). The watermark write-then-rename works on append-only directories as long as the operator pre-creates them.
+- Replicate audit artefacts to an external sink (Rekor, syslog forwarder, S3 with object lock) so replay is detected after the fact.
+
+**Watermark v=2 boot-id witness (v1.3.0 cleanup sweep).** On Linux (`/proc/sys/kernel/random/boot_id`) the watermark records the kernel boot identifier at write time and folds it into the HMAC body. A watermark copied across kernel boot sessions on the same machine breaks signature verification under HMAC mode. Keyless mode logs an advisory NOTICE on boot mismatch but cannot enforce the binding (no MAC). Caveats:
+
+- **Same-host containers share the host kernel boot_id.** The witness defends only cross-boot replay, NOT cross-pod replay between containers running on the same kernel. Multi-tenant deployments should rotate HMAC kids per pod and treat the boot_id as a coarse signal only.
+- **macOS and Windows have no source today.** The earlier `/var/run` mtime fallback was removed in the same sweep after Wave-10 found that mtime moves on every PID/socket write inside the directory, not just on boot, and would have produced false-positive MAC mismatches. A real macOS source (`sysctl kern.boottime`) and a Win32 path are future work.
+- **v=1 watermarks** from earlier builds keep verifying via the legacy MAC body and migrate to v=2 on the next persistEntry; no manual operator step is required.
+
+A full TPM-attested witness remains future work but is no longer the only line of defense on Linux.
 
 **HTTP 503 `audit_persist_failed` semantics.** When `behavior.audit_failure: block` is active (default under `compliance: gdpr | hipaa | pci-dss`) and the audit-log write fails (disk full, permission error, read-only filesystem), the proxy returns `HTTP 503` with body `{"error":"audit_persist_failed"}`. This is a deliberate availability-for-compliance trade-off: the request is refused rather than silently forwarded without an audit trail.
 

@@ -34,9 +34,58 @@ Secrets get redacted permanently. Names, domains, and identifiers get consistent
 
 A full round-trip on a realistic Spring Boot prompt is in [`examples/before-after/`](examples/before-after/). Performance on a laptop-class CPU: ~100 ms p50 anonymize (dominated by Tree-sitter WASM parse cost), single-digit ms rehydration. See [BENCHMARKS.md](BENCHMARKS.md) for measured p50/p95 values.
 
+## New in 1.3
+
+- **Detection-side Unicode hardening.** Latin / Cyrillic / Greek confusables
+  fold to their ASCII baseline before glossary and secret matching.
+  Cross-codepoint NFKC (Hangul L+V jamo, CJK compatibility, combining marks)
+  now normalises correctly, and rehydration strips the width-zero + format
+  character set so pseudonyms split by ZWJ / ZWNJ / CGJ still resolve.
+- **Filter framework** (`filters:` + `trust:` config sections). Disable
+  built-in OrPostFilters or plug in project-local `.mjs` filters. Custom
+  modules only load when `trust.allow_unsigned_local: true` is explicitly
+  set, and `filters.custom_pins` pins a SHA-256 per file so a trusted module
+  cannot be silently swapped. See `docs/examples/custom-filter.mjs` for a
+  hello-world template and
+  [`SECURITY.md#custom-filter-trust-model`](SECURITY.md#custom-filter-trust-model)
+  for the risk model.
+- **`ainonymous preview`** runs the whole anonymization pipeline offline on a
+  file or stdin with no network and no audit persistence. Use it to verify
+  what an outbound request would carry before booking the API call.
+  `--json` strips originals from the output so pipeline transcripts stay
+  safe to archive. Preview does not persist audit entries, so it is a
+  development tool rather than a processing record for production PII.
+- **`ainonymous filters list` / `filters validate`** inspect the effective
+  chain and dry-run custom filter shape checks.
+- **`behavior.streaming.eager_flush`** is an opt-in streaming mode that
+  releases buffered text at sentence or newline boundaries. Trade-off: a
+  pseudonym that spans a boundary inside the sliding window can leak through
+  unrehydrated. The implementation guards known pseudonym shapes (dots in
+  IPv4, colons in IPv6, address separators), but operators accepting this
+  flag should treat the false-negative risk as part of their accountability
+  model.
+- **HMAC keyring for audit sidecars** (`AINONYMOUS_AUDIT_HMAC_KEY_<KID>` +
+  `AINONYMOUS_AUDIT_HMAC_ACTIVE_KID`). Rotate without losing verifiability
+  for historical logs. POSIX builds pick up env changes on `SIGHUP` so
+  rotation no longer requires a full restart. Vault / Azure Key Vault /
+  AWS Secrets Manager examples in [OPERATIONS.md](OPERATIONS.md#audit-hmac).
+- **Cross-session audit chain** persists through proxy restarts. The
+  logger seeds `seq` and `lastHash` from the on-disk checkpoint, so the
+  chain is continuous over the whole day's file rather than resetting on
+  every restart.
+- **NER stages pipeline** (`src/patterns/ner/stages/`) and internal
+  `DetectorPlugin` interface for Layer 1 and Layer 2 detectors. Both are
+  refactors behind the existing public APIs; `detectNames` stays the
+  stable entry point. External plugin loading stays internal in 1.3.
+- **`ainonymous/plugin-api`** subpath export ships the `DetectorPlugin`
+  type and a runtime `assertDetectorPlugin` shape check.
+- **Auto-detect** reads `pyproject.toml`, `setup.py`, the README H1 line,
+  and `git remote get-url origin` so alternate project aliases stop
+  leaking upstream.
+
 ## New in 1.2
 
-- **`behavior.aggression`** (`low` / `medium` / `high`). how strict Layer 3 rewrites AST identifiers. Default is `medium`, which cut findings by ~95 % on our real-repo scans without weakening secret or identity detection. See [`examples/before-after/aggression-comparison.md`](examples/before-after/aggression-comparison.md).
+- **`behavior.aggression`** (`low` / `medium` / `high`). how strict Layer 3 rewrites AST identifiers. Default is `medium`, which cut findings by ~95 % on our real-repo scans without weakening secret or identity detection. See [`examples/before-after/aggression-comparison.md`](examples/before-after/aggression-comparison.md) for side-by-side output and [`BENCHMARKS.md`](BENCHMARKS.md#finding-rate-medium-vs-high-aggression) for methodology and per-repo numbers.
 - OpenRedaction `phone`, `credit-card`, `person-name`, `heroku-api-key` are **off by default**. local regex + NER matched more precisely. Compliance presets re-enable country-specific IDs (HIPAA: SSN + Medicare; PCI-DSS: PAN; …).
 - Phone detection requires a `+` / `00` / German mobile prefix. Credit-card detection is Luhn-checked across every separator (space / dash / dot / slash / colon / underscore / pipe / none).
 - NER now catches first+last name pairs embedded in camelCase (`customerPeterMueller`) and standalone CJK / Korean / Japanese / Arabic / Hebrew / Cyrillic / Thai / Devanagari name runs.
@@ -56,6 +105,27 @@ npx ainonymous
 Requires Node.js 22.5+.
 
 Releases are signed with Sigstore (keyless, via GitHub Actions OIDC) and npm publishes carry a [provenance attestation](https://docs.npmjs.com/generating-provenance-statements). See [SECURITY.md](SECURITY.md#verifying-release-artifacts) if you want to verify a downloaded tarball or the installed package.
+
+### Windows setup
+
+`npm install -g ainonymous` and the CLI work the same on Windows. A few
+paths and service-wrapper details differ from the POSIX defaults:
+
+- Config, shutdown token and audit log live under `%USERPROFILE%\.ainonymous\`
+  instead of `$TMPDIR` so per-user ACLs apply automatically.
+- Use PowerShell for environment variables: `$Env:ANTHROPIC_BASE_URL =
+  "http://localhost:8100"` instead of `export`.
+- For a background service, wrap the CLI with [`nssm`](https://nssm.cc/):
+  `nssm install ainonymous "C:\Program Files\nodejs\node.exe"
+  "C:\path\to\ainonymous\dist\cli\index.js" start`. Set the working
+  directory to the project root that holds `.ainonymous.yml`.
+- `make` is not required. The CLI itself provides `ainonymous scan`,
+  `ainonymous doctor` etc. The `make` targets in this repo are for
+  contributors only.
+
+See [OPERATIONS.md](OPERATIONS.md) for the full deployment runbook
+(systemd is the reference there, but most hardening items apply equally
+on Windows as Service Properties / NTFS ACLs).
 
 ### From source
 
@@ -143,7 +213,11 @@ ainonymous start --open
 #     your PATH.
 ainonymous -- claude
 
-# 5b. Or run the proxy standalone and test it with curl:
+# 5b. Or run the proxy standalone and test it with curl. `$ANTHROPIC_API_KEY`
+#     is your own Anthropic key (console.anthropic.com -> API Keys); the proxy
+#     forwards it untouched to api.anthropic.com. For a pure pipeline smoke
+#     test without hitting Anthropic, use `/health` only; the `/v1/messages`
+#     call below will 401 with a dummy key because the upstream rejects it.
 ainonymous start &
 curl -sS http://localhost:8100/health
 curl -sS -X POST http://localhost:8100/v1/messages \
@@ -226,6 +300,20 @@ behavior:
 session:
   persist: false                      # opt-in: keep pseudonyms across restarts
   persist_path: "./ainonymous-session.db"  # SQLite file, ciphertext only
+
+# Optional sections (all additive; omit for defaults).
+filters:
+  disable: ["credit-card-preset"]             # drop a built-in OrPostFilter
+  custom: ["./ainonymous-filters/ignore-support-tickets.mjs"]
+  custom_pins:                                 # pin the file bytes (lowercase hex)
+    ./ainonymous-filters/ignore-support-tickets.mjs: "a3f1..."
+
+trust:
+  allow_unsigned_local: false   # flip to true only after reviewing the .mjs
+
+behavior:
+  streaming:
+    eager_flush: false          # release text at sentence/\n instead of per-safeSuffix
 ```
 
 Session persistence is off by default. When enabled, the in-memory bimap is mirrored to an AES-256-GCM-encrypted SQLite file so that in-flight LLM responses still rehydrate correctly after a proxy restart. Requires Node.js 22.5+ (uses built-in `node:sqlite`, no native build). Provide a stable key via `AINONYMOUS_SESSION_KEY` (base64, 32 bytes) to keep the DB readable across processes. without it the DB is effectively wiped on every fresh start. See [SECURITY.md](SECURITY.md#session-map-persistence-opt-in) for the confidentiality model.
@@ -268,6 +356,32 @@ Paths listed in `code.sensitive_paths` always run in `high` regardless of the gl
 
 **Compliance is not certification.** These presets help you detect *likely* sensitive data. they do not make your use of an LLM regulator-approved. Verify with your DSB / DPO / compliance officer.
 
+### Audit integrity (HMAC sidecar)
+
+Operator runbook lives in [OPERATIONS.md](OPERATIONS.md#audit-hmac) (key
+storage, rotation, recovery). The short version follows.
+
+By default `audit verify` is a chain-consistency check, not cryptographic
+tamper-evidence. From v1.3.0 you can enable an HMAC sidecar by exporting a
+32-byte key before the proxy starts:
+
+```bash
+export AINONYMOUS_AUDIT_HMAC_KEY=$(openssl rand -base64 32)
+ainonymous start
+```
+
+The logger writes a parallel `.jsonl.hmac` file with one `{seq, kid, mac}`
+entry per audit record. `audit verify` then cross-checks the sidecar, and
+flags tamper when either the jsonl or the sidecar was edited, when the
+sidecar is missing, or when the key was silently unset at verify time.
+
+Rotate without downtime of verify coverage by running the keyring
+variant: export one `AINONYMOUS_AUDIT_HMAC_KEY_<KID>` per key and point
+`AINONYMOUS_AUDIT_HMAC_ACTIVE_KID` at the one that should sign new
+lines. Older kids stay verifiable as long as their env var is still
+set. See [OPERATIONS.md](OPERATIONS.md#audit-hmac) for the secrets-manager
+wiring (Vault, Azure Key Vault, AWS Secrets Manager).
+
 ### Management endpoint auth
 
 By default the proxy binds to `127.0.0.1` and `/metrics`, `/metrics/json`, `/dashboard`, and `/events` are reachable without a token. If you bind to a non-local interface (e.g. `AINONYMOUS_HOST=0.0.0.0` in a container), set a bearer token so these endpoints are not exposed:
@@ -289,18 +403,23 @@ Browsers cannot attach `Authorization` headers to `<link>` / `<script>` / `Event
 | `ainonymous init --show` | Print the generated YAML to stdout without writing it |
 | `ainonymous doctor` | Validate node version, config and port availability before first start |
 | `ainonymous doctor --strict` | Same as `doctor`, but exits non-zero on any warning. Wire into CI. |
+| `ainonymous doctor --force` | Ignore identity-coverage warnings and exit 0 (for setups that intentionally leave one field blank). |
 | `ainonymous start` | Start the proxy server |
 | `ainonymous start --open` | Start and open the dashboard in the default browser |
 | `ainonymous stop` | Stop the running proxy |
 | `ainonymous status` | Check if proxy is running |
 | `ainonymous scan` | Dry run: histogram + top-files summary |
 | `ainonymous scan --preview N` | Dry run: dump before/after text for the first N files with findings |
+| `ainonymous scan --aggression low\|medium\|high` | Override Layer 3 aggression for the scan run (see BENCHMARKS.md). |
 | `ainonymous scan -v` | Dry run: raw per-finding dump |
 | `ainonymous audit tail` | Show last 20 audit log entries |
 | `ainonymous audit pending` | Show pseudonyms the LLM response never referenced; splits sentinel-only entries out |
 | `ainonymous audit verify` | Verify the SHA-256 hash chain across all audit JSONL files. Exit 0 clean, 2 tamper, 3 missing checkpoint under `--strict` |
 | `ainonymous audit export` | Export logs as consolidated JSON (SIEM-ready) |
 | `ainonymous config migrate` | Upgrade an older `.ainonymous.yml` to the current schema |
+| `ainonymous preview --input-file <path>` | Offline dry-run: pipe a file or stdin through anonymization and print anonymized text + findings. Add `--json` for machine-readable output. |
+| `ainonymous filters list` | Print the active OrPostFilter chain and any disabled built-ins |
+| `ainonymous filters validate <path>` | Shape-check a custom `.mjs` filter module without registering it |
 | `ainonymous glossary add <term>` | Add a domain term to config |
 | `ainonymous glossary list` | List configured domain terms |
 | `ainonymous glossary suggest` | Suggest new terms from project scan |
@@ -348,6 +467,7 @@ AInonymous reduces the risk of leaking sensitive data but **does not guarantee c
 - Compliance presets (GDPR, HIPAA, etc.) provide detection patterns for common data types. **Using these presets does not make your organization compliant** with any regulation.
 - The tool is not a substitute for a professional security audit or legal review.
 - Streaming responses are rehydrated via a per-content-block sliding buffer that reassembles pseudonyms split across SSE event boundaries (e.g. `Alpha` | `Corp` | `Service`). The buffer sizes itself from the current session map's longest pseudonym, so the first visible text is delayed by roughly that many characters.
+- OAuth subscription flows (Claude Code Max-Plan, Cursor Pro) route through the proxy once the tool respects `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`. The proxy passes the `Authorization: Bearer <token>` header through to the provider unchanged; only the request body is anonymized. What does not route is the browser-based OAuth *login* itself (that talks to `claude.ai` / provider-specific UIs, not `api.anthropic.com`) and any client that pins the upstream hostname. Enable `behavior.oauth_passthrough: true` to forward non-`/v1/messages` paths (OAuth refresh, organization lookups) as-is, without body anonymization.
 
 You are responsible for reviewing what gets sent to LLM APIs. Use `ainonymous scan` to preview what would be anonymized before relying on the proxy.
 
@@ -371,6 +491,9 @@ AInonymous on Windows writes to `%USERPROFILE%\.ainonymous\` instead of `%TEMP%`
 **Tree-sitter WASM fails to load on arm64**
 `tree-sitter-wasms` ships prebuilt WASM for common triples. If your platform is unusual, the first `anonymize()` call will surface a load error with the exact path. File an issue with `uname -a` + the error.
 
+**Custom filter appears to be ignored**
+Run `ainonymous filters list`. If your filter id is not in the active chain, the proxy refused to load it - most common cause is `trust.allow_unsigned_local` left at the default `false`. Flip it to `true` in `.ainonymous.yml`, or pin the file via `filters.custom_pins` (lowercase SHA-256) when you want to keep the trust gate strict. `ainonymous filters validate <path>` shape-checks a single file without starting the proxy and prints the reason for any rejection.
+
 ## For security and compliance teams
 
 If you're evaluating AInonymous on behalf of a security / privacy / legal organization rather than as an individual developer, these are the artefacts you probably want to read:
@@ -386,7 +509,7 @@ If you're evaluating AInonymous on behalf of a security / privacy / legal organi
 
 Telemetry: AInonymous does not send any data anywhere except the configured upstream LLM endpoint. There is no phone-home, no usage tracking, no error-reporting service. You can verify with `tcpdump` on `lo0`/`eth0` during a session - the only outbound connection is HTTPS to `api.anthropic.com` / `api.openai.com` (or the upstream you configured).
 
-Maintenance model: solo-maintained, MIT-licensed, responses best-effort (see SECURITY.md). For enterprise adoption consider pinning the exact version (`"ainonymous": "1.2.2"`, not `^`), running `npm audit signatures` on upgrade, and verifying Sigstore signatures on the GitHub Release tarball. Commercial support is not part of this repository - see the "About" section at the bottom for contact.
+Maintenance model: solo-maintained, MIT-licensed, responses best-effort (see SECURITY.md). For enterprise adoption consider pinning the exact version (`"ainonymous": "1.3.0"`, not `^`), running `npm audit signatures` on upgrade, and verifying Sigstore signatures on the GitHub Release tarball. Commercial support is not part of this repository - see the "About" section at the bottom for contact.
 
 ## Contributing
 

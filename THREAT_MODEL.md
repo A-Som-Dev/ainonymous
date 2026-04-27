@@ -1,8 +1,8 @@
 # AInonymous Threat Model
 
-Version: 1.2.2
+Version: 1.3.0
 Framework: STRIDE (primary), LINDDUN (appendix)
-Last updated: 2026-04-19
+Last updated: 2026-04-23
 
 This document describes the adversaries AInonymous is designed to mitigate, the adversaries it deliberately does not, and the residual risks that remain after the current mitigations. It is meant to be read alongside `SECURITY.md` (user-facing policy), `OPERATIONS.md` (deployment guidance) and `docs/HANDOVER.md` (open work items).
 
@@ -77,6 +77,14 @@ The tone is conservative on purpose. Anonymization is a risk-reduction control, 
 - **TB1** user workstation <-> local adversaries on the same machine (same UID, different UID, kernel).
 - **TB2** proxy process <-> upstream LLM provider over the public internet.
 - **TB3** user <-> the `ainonymous` npm package and its transitive dependencies.
+- **TB4** proxy process <-> project-local plugins and custom filters loaded
+  via `filters.custom` (v1.3). Plugins run **in-process** with full access
+  to the session map, pseudonyms, raw pre-Layer-1 input, and the Node.js
+  runtime (filesystem, network, env). The `trust.allow_unsigned_local` flag
+  is a binary opt-in, not a sandbox. Mitigation for v1.3 is operational:
+  keep the flag off in production, code-review any `.mjs` before enabling,
+  host the proxy behind egress controls. Worker-Thread isolation and
+  Sigstore-cosign verification are tracked for v2.1 (ADR-014).
 
 ### Data flows worth naming
 
@@ -224,10 +232,13 @@ Legend:
 
 | STRIDE | Threat | Status | Notes |
 |---|---|---|---|
-| S | Attacker writes a forged audit file. | `partial` | Hash chain detects tampering of non-terminal entries; the last entry is unprotected. `SECURITY.md` and `OPERATIONS.md` both call this out. Mitigation: external checkpoint (digest + append-only store) on a schedule. |
-| T | Modified audit entry in the middle of a file. | `mitigated` | `verifyAuditChain` returns the first bad seq. Break is detectable by anyone with the file. |
+| S | Attacker writes a forged audit file. | `mitigated` (HMAC) / `partial` (keyless) | With `AINONYMOUS_AUDIT_HMAC_KEY` set: per-entry MAC sidecar (`.jsonl.hmac`) plus checkpoint MAC v=2 binding `{ckpt-blob, seq, file-basename}` plus external watermark in `$AINONYMOUS_STATE_HOME` MAC-bound to `{v, audit_dir, max_seq, last_hash}`. Keyless mode: chain consistency only, see RT-W8-02 limitation in section 5 below. |
+| T | Modified audit entry in the middle of a file. | `mitigated` | `verifyAuditChain` returns the first bad seq, plus per-entry HMAC catches the modification independently. |
+| T | Truncated jsonl + forged checkpoint (same-file rollback). | `mitigated` | `seedFromCheckpoint` compares `parsed.lastSeq` to the actual jsonl-tail seq via `readJsonlTailSeq`. Empty or unparseable jsonl tails are treated as tamper-evidence. |
+| T | Atomic rollback of jsonl + checkpoint + checkpoint.hmac. | `mitigated` (HMAC) / `partial` (keyless) | External watermark in `$AINONYMOUS_STATE_HOME/audit-state/` stays at the higher seq when the audit dir alone is rolled back. Keyless mode: see section 5 4-tuple-rollback limitation. |
+| T | Watermark deletion or forgery. | `mitigated` (HMAC) / `partial` (keyless) | Watermark-absent triggers an unconditional refuse when a checkpoint exists. Watermark forgery without `kid+mac` while HMAC is configured triggers "watermark missing signature while HMAC is configured" refuse. Keyless mode has no MAC to verify against, so a dual-write attacker can forge the watermark - see RT-W8-02 in section 5. |
 | R | Non-repudiation of replacements made. | `partial` | The log proves "a replacement of type X happened at offset Y" but does not prove which upstream request it belonged to (no request-id correlation). If correlation is required, emit a request-id from the proxy layer. |
-| I | Plaintext originals appearing in the log. | `mitigated` | Only SHA-256 truncated hash of the original is persisted (`logger.ts:8-10, 39`). Pseudonyms were historically in the log; removed for GDPR Art. 4(5) compliance (see the comment at `logger.ts:32-34`). |
+| I | Plaintext originals appearing in the log. | `mitigated` | Only SHA-256 truncated hash of the original is persisted. Pseudonyms were historically in the log; removed for GDPR Art. 4(5) compliance. |
 | D | Disk fills up because no retention. | `partial` | File rotates at 10 MB. `OPERATIONS.md` documents retention as operator responsibility with a cron example. Not enforced by the code. |
 | E | N/A | `out-of-scope` | |
 
@@ -267,7 +278,11 @@ The 32-byte AES key is generated in the `BiMap` constructor and never zeroed (`s
 
 ### R3 - Crafted-pseudonym rehydration in malicious upstream responses
 
-A compromised upstream can emit the string `alpha-corp.internal` in a response; the rehydrator will substitute `asom.de`. More generally, any pseudonym the session has ever generated will rehydrate. An attacker upstream can therefore "decrypt" the session map one pseudonym at a time by echoing candidate pseudonyms. This is not a bug per se - it is what rehydration does - but it means the LLM provider (or anyone who can tamper with its responses) learns originals for pseudonyms they observed, which undermines the confidentiality story against A3/A5. Mitigation today: none. Long-term: constrain rehydration to response ranges the model actually wrote (requires signed-response primitive that neither Anthropic nor OpenAI offers). Acknowledged as a fundamental limit of the design.
+A compromised upstream can emit the string `alpha-corp.internal` in a response; the rehydrator will substitute `asom.de`. Any pseudonym the session has ever generated will rehydrate unless the caller narrows the set. An attacker upstream can therefore "decrypt" the session map one pseudonym at a time by echoing candidate pseudonyms.
+
+**Status: mitigated in v1.2.0+.** The proxy tracks which pseudonyms were actually emitted on the request path and passes that set as `allowedPseudonyms` to `Pipeline.rehydrate`. A response echoing a pseudonym outside that set is left untouched. An upstream can still oracle pseudonyms the caller actually sent, which is inherent to rehydration; it can no longer probe the entire historical session map in one shot.
+
+Residual acknowledged gap: signed-response primitives that would let the proxy attribute a pseudonym to a specific model span (neither Anthropic nor OpenAI offers that today). Long-term target for v2.x.
 
 ### R4 - SSE pseudonym split across events is not rehydrated
 
@@ -275,13 +290,25 @@ Documented in `SECURITY.md`. An SSE event boundary can land mid-pseudonym (`Alph
 
 ### R5 - Supply-chain integrity of published releases
 
-The package is built and published through GitHub Actions. Releases are signed via Sigstore (keyless, via GitHub OIDC) and npm publishes carry a provenance attestation (P1-3, closed). A compromised npm token could still publish a trojaned `ainonymous@latest`, but downstream users can detect it via `npm audit signatures` (rejects missing/invalid provenance) and cosign verification of the GitHub Release tarball. Mitigation today: pin to an exact version (e.g. `"ainonymous": "1.2.2"`, not `^`), run `npm audit signatures` before upgrading, diff-review the diff between tags for unexpected dependency additions.
+The package is built and published through GitHub Actions. Releases are signed via Sigstore (keyless, via GitHub OIDC) and npm publishes carry a provenance attestation (P1-3, closed). A compromised npm token could still publish a trojaned `ainonymous@latest`, but downstream users can detect it via `npm audit signatures` (rejects missing/invalid provenance) and cosign verification of the GitHub Release tarball. Mitigation today: pin to an exact version (e.g. `"ainonymous": "1.3.0"`, not `^`), run `npm audit signatures` before upgrading, diff-review the diff between tags for unexpected dependency additions.
 
 ### Audit integrity: chain-consistency vs tamper-evidence
 
 The v1.2.x hash-chain verifier is a consistency check, not cryptographic tamper-evidence. It catches an attacker who modifies an entry mid-chain (the next entry's `prevHash` disagrees), but an attacker with write access to both the JSONL file and the `.checkpoint` sidecar can truncate both and recompute a clean chain. The `.checkpoint` requires no signer identity.
 
-An HMAC-sidecar (a short tag, rolling key, server-side only, rotated with `AINONYMOUS_AUDIT_HMAC_KEY`) is tracked for v1.3. Until then, operators who need tamper-evidence in the cryptographic sense should replicate `.checkpoint` files to an append-only store (S3 Object Lock, remote syslog, git commit) so the external medium provides the evidence the current scheme does not. See `SECURITY.md` → "Audit-log truncation detection".
+Since v1.3.0 an opt-in HMAC-Sidecar is available. Set `AINONYMOUS_AUDIT_HMAC_KEY` to a base64-encoded 32-byte key; the logger writes a parallel `.jsonl.hmac` file with one `{seq, mac}` record per entry, and `audit verify` cross-checks it. Without the key the integrity guarantee stays at chain-consistency. Key management (generation, rotation, storage, revocation after leak) is the operator's responsibility; see `OPERATIONS.md` → "Audit HMAC" for the runbook. Operators who cannot manage a key can still replicate `.checkpoint` files to an append-only external store (S3 Object Lock, remote syslog, a git-backed archive).
+
+### Replay defense: depth and the 4-tuple limitation
+
+v1.3.0 stacks four checks against a write-capable attacker on the audit dir: (a) checkpoint MAC v=2 binds blob+seq+basename, refuses v=1; (b) JSONL tail-seq compare runs even keyless and refuses on rollback or unparseable tail; (c) external watermark in `$AINONYMOUS_STATE_HOME/audit-state/<first-32-hex-chars-of-sha256(audit_dir)>.json` MAC-bound to `{v, audit_dir, max_seq, last_hash}`, written via write-then-rename, refuses on missing-but-checkpoint-claims-progress; (d) read-side watermark verification is unconditional - the `AINONYMOUS_AUDIT_NO_WATERMARK` env only gates writes (tests / ephemeral runs).
+
+**Known limitation - 4-tuple rollback / forge in keyless mode.** Without `AINONYMOUS_AUDIT_HMAC_KEY` the external watermark is written without a MAC, so a dual-write attacker (audit_dir + `$AINONYMOUS_STATE_HOME`) has three equivalent paths to wipe the chain: rollback all four artefacts atomically, delete the watermark and forge a `lastSeq=0` checkpoint, or forge a fake jsonl with a matching unsigned watermark. The startup NOTICE explicitly calls this out as advisory-only. Single-user dev / single-OS-user deployments are exposed. With HMAC configured the unsigned watermark write is refused and the rollback branch is closed. Mitigations available today are operational:
+
+- run the proxy as a service user with read-only access to `$AINONYMOUS_STATE_HOME`,
+- place the state-home on an append-only filesystem (`chattr +a`, `chflags uappnd`), or
+- replicate audit artefacts to an external sink (Rekor, syslog, S3 object-lock).
+
+A Linux-only boot-id witness ships in this release as defense-in-depth: watermarks v=2 record `/proc/sys/kernel/random/boot_id` and fold it into the HMAC body. A watermark copied across kernel boot sessions on the same machine breaks signature verification under HMAC mode. Keyless mode logs an advisory NOTICE on boot mismatch but cannot enforce the binding without a MAC. Same-host containers share the host kernel boot_id, so cross-pod replay on the same kernel is NOT covered (rotate HMAC kids per pod for that case). macOS and Windows have no boot-id source today; the binding is a no-op there. A full TPM-attested external witness remains future work for the cases the boot-id source cannot cover.
 
 ---
 
@@ -321,7 +348,12 @@ AInonymous does not protect against:
 - **P2-4** ~~JSON-aware SSE delta reassembly.~~ Done via per-content-block sliding buffer in `src/proxy/stream-rehydrator.ts`. R4 resolved.
 - **P5-12** ~~Dashboard CSP without `'unsafe-inline'`.~~ Done: `dashboard/app.js` and `dashboard/app.css` are same-origin. See `SECURITY.md` → "Dashboard CSP".
 - **P5-14** ~~Windows ACL for the shutdown token file.~~ Done: stored under `%USERPROFILE%\.ainonymous\` with best-effort icacls hardening.
-- **v1.2 candidates** still open: Unicode confusables table (Cyrillic/Latin homoglyph bypass of keyword regexes); HMAC (keyed) instead of plain SHA-256 for the audit chain so an insider with write access cannot forge the tail; pseudonym-replay guard so a user replaying a pseudonym they saw in the dashboard cannot drive rehydration; per-regex timeout for user-supplied `secrets.patterns` to defuse ReDoS in hostile configs.
+- **v1.3 landed** items: Unicode confusables fold covers Cyrillic/Greek/Latin-Extended/Letterlike/Armenian/Cherokee/Old-Italic/Gothic/Deseret homoglyphs (see `src/patterns/confusables.ts`); optional HMAC-Sidecar for audit tamper-evidence via `AINONYMOUS_AUDIT_HMAC_KEY`; BiMap rejects sentinel-shaped originals; rehydrate canonical-form matching for IPv6; cross-codepoint-NFKC per grapheme cluster.
+- **Open candidates** for later minors: pseudonym-replay guard so a user replaying a pseudonym they saw in the dashboard cannot drive rehydration; per-regex timeout for user-supplied `secrets.patterns` to defuse ReDoS in hostile configs; Streaming tool_use / thinking delta rehydration.
+
+### Note on Confusables Folding (v1.3)
+
+The fold is a **many-to-one mapping on the detection side only**: Cyrillic `а` (U+0430) and Latin `a` (U+0061) both map to `a` while the detector decides whether to replace them, but the Original side of the session map keeps the exact codepoints that appeared in the input. Two different originals (`acme.com` with Latin `a` and `асme.com` with Cyrillic `а`) are treated as the same protected entity for detection, each gets its own audit record (different `originalHash`), and rehydration uses the original codepoints. This strengthens Art. 4(5) pseudonymisation against homoglyph-tailed typosquat payloads - the detector no longer misses a Cyrillic-impersonated domain just because the regex was ASCII-only - and it does not introduce a pseudonym collision because the hash key is still the pre-fold string.
 
 ---
 

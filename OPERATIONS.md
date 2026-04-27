@@ -16,7 +16,7 @@ docker run -d --name ainonymous \
   -p 127.0.0.1:8100:8100 \
   -v /var/lib/ainonymous/audit:/app/ainonymous-audit \
   -e AINONYMOUS_HOST=0.0.0.0 \
-  ainonymous:1.2.2
+  ainonymous:1.3.0
 
 # Pre-flight check (exit non-zero under --strict if node version,
 # port availability, or config validation produce any warning)
@@ -80,13 +80,13 @@ ainonymous audit verify --dir /var/lib/ainonymous/audit
 ainonymous audit verify --dir /var/lib/ainonymous/audit --strict
 ```
 
-The verifier is a **chain-consistency check**, not a tamper-evidence
-authentication. Checkpoint sidecars commit `lastSeq + lastHash`, but an
-attacker with write access to both the JSONL files and the `.checkpoint` can
-truncate both and re-derive a self-consistent chain. HMAC-signed checkpoints
-are tracked for v1.3 (see THREAT_MODEL.md). Meanwhile,
-ship `.checkpoint` files to an append-only store (S3 Object Lock, git
-commit, remote syslog) for external tamper evidence.
+The chain-check alone is a **consistency** check, not cryptographic
+tamper-evidence. An attacker with write access to both the JSONL files and
+the `.checkpoint` can truncate both and re-derive a self-consistent chain.
+From v1.3.0 onwards the HMAC-Sidecar ("Audit HMAC" section below) closes
+that gap when an operator-managed key is configured. If HMAC is not an
+option, ship `.checkpoint` files to an append-only store (S3 Object Lock,
+git commit, remote syslog) for external tamper evidence.
 
 **Library usage:**
 
@@ -142,6 +142,186 @@ of currently-failing files) and `ainonymous_audit_chain_broken{file="..."}`
 
 For shorter retention, pair with hash-chain verification before deletion so tampering is detected before evidence is destroyed.
 
+### Verify exit codes
+
+`ainonymous audit verify` returns one of:
+
+- `0` - all JSONL files in the directory have a consistent chain (and
+  matching HMAC sidecars if `AINONYMOUS_AUDIT_HMAC_KEY` is set).
+- `2` - at least one file reports `tamper` (chain mismatch, HMAC
+  mismatch, malformed checkpoint, or an HMAC sidecar that exists while
+  the verify-time key is unset).
+- `3` - under `--strict`, at least one file has no `.checkpoint`.
+- `1` - no audit logs in the directory, or CLI misuse.
+
+Pipe a non-zero exit into your alerting (`|| page-oncall`).
+
+## Audit HMAC
+
+The chain-check under `audit verify` is a consistency check only. Set
+`AINONYMOUS_AUDIT_HMAC_KEY` to a base64-encoded 32-byte key before the
+proxy starts to add HMAC-SHA256 tamper-evidence:
+
+```bash
+export AINONYMOUS_AUDIT_HMAC_KEY=$(openssl rand -base64 32)
+# or from a secrets store
+export AINONYMOUS_AUDIT_HMAC_KEY=$(vault read -field=key secret/ainonymous/audit)
+
+ainonymous start
+```
+
+The logger writes a parallel `.jsonl.hmac` sidecar (one `{seq, kid, mac}`
+record per entry). `audit verify` cross-checks the sidecar via
+`crypto.timingSafeEqual` and returns `tamper` when the sidecar is
+missing, the key is silently unset at verify time, or any entry no
+longer matches its recorded MAC.
+
+**Rotation requires a proxy restart.** `AINONYMOUS_AUDIT_HMAC_KEY` is read
+once at Logger construction and cached; changing the env var at runtime
+(SIGHUP, `export`) does not pick up the new key. Drain traffic, stop the
+proxy, update the env, start the proxy. The same holds for
+`AINONYMOUS_MGMT_TOKEN` and `AINONYMOUS_SESSION_KEY`: all three env-sourced
+secrets are resolved at startup and cached for the process lifetime.
+
+**Rotation workflow** (keyring). The sidecar entries carry a `kid` field.
+Provide one key per kid through environment variables and tell the
+proxy which kid is active. Older kids remain verifiable as long as they
+stay in the environment. The kid is the suffix after
+`AINONYMOUS_AUDIT_HMAC_KEY_`, lowercased, and must match
+`^[a-z0-9][a-z0-9._-]{0,63}$`. Shell convention is to keep env-var names
+uppercase, so `AINONYMOUS_AUDIT_HMAC_KEY_V1` and
+`AINONYMOUS_AUDIT_HMAC_KEY_v1` resolve to the same kid `v1`:
+
+```bash
+export AINONYMOUS_AUDIT_HMAC_KEY_V1=$(vault read -field=key secret/ainonymous/audit/v1)
+export AINONYMOUS_AUDIT_HMAC_KEY_V2=$(vault read -field=key secret/ainonymous/audit/v2)
+export AINONYMOUS_AUDIT_HMAC_ACTIVE_KID=v2
+ainonymous start
+```
+
+On POSIX, the proxy re-reads the `AINONYMOUS_AUDIT_HMAC_KEY_*` env vars
+on `SIGHUP`, so you can rotate the active kid at runtime without
+restarting. Keep the previous kid exported until its JSONL+sidecar pair
+is archived; `audit verify` needs both to round-trip older entries.
+
+New log lines are signed with `v2`. Existing sidecar lines tagged `v1`
+still verify as long as `AINONYMOUS_AUDIT_HMAC_KEY_V1` is exported.
+Retire `v1` by removing the export only after you have archived the
+affected JSONL+sidecar pair off-host.
+
+The legacy single-key env `AINONYMOUS_AUDIT_HMAC_KEY` is treated as
+`kid=default` and can run alongside the keyring during migration. Mixing
+kids within one log file is still rejected as tamper (downgrade guard).
+
+**Secrets-manager integration**. Any store that can emit a base64 blob
+into the process env works. Reference patterns:
+
+```bash
+# HashiCorp Vault
+export AINONYMOUS_AUDIT_HMAC_KEY_V2=$(vault kv get -field=hmac_key secret/ainonymous/audit/v2)
+
+# Azure Key Vault (via CLI)
+export AINONYMOUS_AUDIT_HMAC_KEY_V2=$(az keyvault secret show \
+  --vault-name ainonymous-prod --name audit-hmac-v2 --query value -o tsv)
+
+# AWS Secrets Manager
+export AINONYMOUS_AUDIT_HMAC_KEY_V2=$(aws secretsmanager get-secret-value \
+  --secret-id ainonymous/audit/hmac-v2 --query SecretString --output text)
+```
+
+Drive rotation from the same workflow: add the new kid to the store,
+restart the proxy with both kids exported and `ACTIVE_KID` pointing at
+the new one, retire the old kid once the archival window has passed.
+
+**Incident response on key leak**. If `AINONYMOUS_AUDIT_HMAC_KEY` has
+been exposed:
+
+1. Assume all existing `.hmac` sidecars from the leak window offer no
+   tamper evidence against the leaker.
+2. Rotate to a new key immediately (see above) and restart the proxy.
+3. Replicate both the JSONL files and the existing sidecars into your
+   append-only external store with a timestamp before rotation. External
+   storage becomes the evidence medium for the leaked window.
+4. Document the leak window in the incident log. Downstream auditors
+   need to know which log ranges are only chain-consistency-protected.
+
+## External Audit Watermark
+
+v1.3.0 ships an external watermark that lives outside the audit directory
+(default `~/.ainonymous/audit-state/<first-32-hex-chars-of-sha256(audit_dir)>.json`,
+override via `AINONYMOUS_STATE_HOME`). The watermark closes the
+atomic 3-tuple replay window (jsonl + checkpoint + checkpoint.hmac
+all rolled back together).
+
+**Operational notes:**
+
+- The watermark is written via write-then-rename so a crash mid-write
+  cannot leave a torn JSON body that the read side would silently treat
+  as absent.
+- The read side runs unconditionally. `AINONYMOUS_AUDIT_NO_WATERMARK=1`
+  only skips writes (for tests / ephemeral runs) and emits a one-shot
+  NOTICE so the situation is visible in logs.
+- A subsequent restart without the env will refuse to seed (the watermark
+  is now genuinely missing). Either keep the env consistent for the
+  lifetime of an audit dir or wipe the audit dir before restart.
+
+**Upgrade from a pre-1.3.0 build.** A pre-1.3.0 audit directory has
+checkpoint files but no external watermark. On first start under
+v1.3.0+ the logger will print:
+
+```
+WARNING: audit checkpoint exists at ... but the external watermark at ... is missing;
+refusing to seed chain. If this is a clean upgrade from a pre-1.3.0 build,
+remove the audit directory and restart to start a fresh chain.
+```
+
+The supported upgrade procedure is:
+
+```bash
+# 1. Run audit verify against the old directory and archive the result
+ainonymous audit verify ./ainonymous-audit > pre-upgrade-verify.txt
+
+# 2. Move the old directory aside (do not delete - you may need it for
+#    GDPR Art 30 evidence)
+mv ./ainonymous-audit ./ainonymous-audit.pre-1.3.0
+
+# 3. Start the new build with a fresh audit dir
+ainonymous start
+```
+
+The old chain remains independently verifiable with `audit verify`. The
+new chain starts at seq=0 under v1.3.0's stricter integrity model
+(checkpoint MAC v=2 + watermark + tail-seq compare).
+
+A first-class `audit migrate` command is tracked for a future release.
+
+### Migrating from keyless to HMAC mode
+
+A proxy started without `AINONYMOUS_AUDIT_HMAC_KEY` writes the audit chain in keyless mode: per-entry sidecar `.jsonl.hmac` files are not produced and the external watermark is written without a `kid`/`mac`. After turning HMAC on, the next `seedFromCheckpoint` will refuse with **"audit watermark missing signature while HMAC is configured"** because the existing watermark has no MAC. The supported procedure is:
+
+```bash
+# 1. Drain in-flight traffic and stop the proxy.
+ainonymous stop
+
+# 2. Verify and archive the keyless chain (it stays independently
+#    verifiable under chain-consistency rules).
+ainonymous audit verify ./ainonymous-audit > pre-hmac-verify.txt
+mv ./ainonymous-audit ./ainonymous-audit.keyless
+
+# 3. Remove the legacy watermark for this audit_dir so the new chain
+#    starts cleanly. The path is
+#    "$AINONYMOUS_STATE_HOME/audit-state/<first-32-hex-chars-of-sha256(audit_dir)>.json".
+rm -f ~/.ainonymous/audit-state/*.json
+
+# 4. Generate a key, export it, and start the proxy with a fresh audit dir.
+export AINONYMOUS_AUDIT_HMAC_KEY=$(openssl rand -base64 32)
+ainonymous start
+```
+
+The first persist after restart writes a new HMAC-signed watermark and per-entry sidecar. The archived keyless chain remains as evidence for the pre-migration window; any audit window analysis that needs to span both must aggregate `pre-hmac-verify.txt` and the new `audit verify` output side-by-side.
+
+The reverse direction (keyed → keyless) is not supported: dropping the key downgrades the integrity tier and the existing per-entry `.jsonl.hmac` sidecars would refuse to verify on the next run.
+
 ## Session Key Rotation
 
 When `session.persist: true`, the SQLite store is encrypted under `AINONYMOUS_SESSION_KEY`. The current v1.0 flow is explicit and manual. no online rotation CLI:
@@ -181,7 +361,7 @@ ainonymous stop
 
 # 3. Upgrade
 npm install -g ainonymous@latest
-# or: docker pull ainonymous:1.2.2
+# or: docker pull ainonymous:1.3.0
 
 # 4. Start
 ainonymous start
@@ -201,6 +381,22 @@ ainonymous start
 ```
 
 Audit logs from the newer version are backward-compatible. the `seq` and `prevHash` fields are optional in the schema.
+
+## Concurrent AuditLogger instances on the same persist_dir
+
+Run **one** AuditLogger per `audit.persist_dir`. The append to `*.jsonl` is
+POSIX-atomic per write, but the `.checkpoint` and `.checkpoint.hmac` sidecars
+are rewritten via `atomicWriteFileSync` (write-then-rename) on every entry.
+Two writers in the same directory race on the rename, so the surviving
+`.checkpoint.hmac` may sign a different `.checkpoint` blob than is on disk.
+The next restart catches the mismatch (`audit verify` reports a signature
+mismatch and `seedFromCheckpoint` refuses to seed), so no silent corruption,
+but the chain becomes unverifiable until the operator clears it.
+
+If you need to scale write throughput, give each worker its own `persist_dir`
+and merge offline. A future release will add a process-level lockfile
+(`.checkpoint.lock` with `O_EXCL`) so the second writer fails fast at
+startup; for v1.3.0 this is operator-side discipline.
 
 ## Incident Response
 
@@ -341,3 +537,4 @@ See `SECURITY.md` and `README.md` for detail. Most important for operators:
 - `sensitive_paths` / `redact_bodies` apply only during `ainonymous scan`, not at proxy time (use `// @ainonymous:redact` comments for proxy-time body redaction).
 - Management endpoints (`/metrics`, `/metrics/json`, `/dashboard`, `/dashboard/app.js`, `/dashboard/app.css`, `/events`) are bearer-token-protected when `behavior.mgmt_token` or `AINONYMOUS_MGMT_TOKEN` is set. Default is token-less but the proxy refuses to expose on non-localhost without a token on startup warning. Keep behind a network policy regardless.
 - The audit log is a SHA-256 hash chain, not an HMAC. Tampering is detectable against external adversaries without filesystem write access; an insider with write access to the audit dir can forge or truncate the tail. Mitigate by shipping the JSONL to an append-only sink (S3 Object Lock, immutable Loki index).
+- **Single writer per `audit_dir`**. The chain-hash seq counter and the `.checkpoint` sidecar assume one logger instance per directory. Running two proxies that share the same `behavior.audit_dir` interleaves sequence numbers and makes `audit verify` report tamper on a benign concurrency collision. Each instance needs its own directory (Kubernetes: per-pod PVC; systemd: per-unit WorkingDirectory), or a shared external log sink consumes each proxy's stream separately.

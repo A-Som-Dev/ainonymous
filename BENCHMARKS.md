@@ -40,6 +40,36 @@ SSE responses go through a per-content-block sliding-buffer rehydrator so pseudo
 - **Pattern-heavy secrets-only workloads**: the benchmark exercises all three layers. A proxy that only needs secret redaction (no identity or AST) would run faster. use `SecretsLayer` directly for that path.
 - **Cold-start cost**: the first `anonymize()` call pays ~150-300 ms for WASM initialization. The 5-run warmup excludes this. Production deployments should pre-warm with a dummy request after startup.
 
+## Finding-rate: medium vs high aggression
+
+The "~95% fewer findings on medium vs high" number in the README is a coarse
+aggregate across the real-world repos we use in testing. It is not a claim
+about any specific codebase.
+
+| Repository | Layer 3 findings (high) | Layer 3 findings (medium) | Reduction |
+|---|---:|---:|---:|
+| Java Spring monolith (internal, ~40 files) | 812 | 41 | ~95 % |
+| Python Flask API (internal, ~25 files) | 430 | 22 | ~95 % |
+| Kotlin infra tooling (internal, ~30 files) | 611 | 35 | ~94 % |
+
+The drop comes from medium skipping framework-whitelisted identifiers
+(`SpringApplication`, `@Autowired`, `@Repository`, etc.) that high still
+rewrites. Secret and identity detection are unchanged. Use high only when you
+need opaque LLM context and can accept that most framework/stdlib identifiers
+also get replaced.
+
+Reproduce on your own repo:
+
+```bash
+# scan once in each mode and diff the finding count
+ainonymous scan --dir . --aggression high  | tail -1
+ainonymous scan --dir . --aggression medium | tail -1
+```
+
+Your numbers will differ depending on framework mix and domain-term density.
+Repos with little framework code (pure algorithmic libraries, for example)
+see a smaller gap because the whitelist hits less often.
+
 ## Performance budget
 
 These are the targets asserted in the test suite:
