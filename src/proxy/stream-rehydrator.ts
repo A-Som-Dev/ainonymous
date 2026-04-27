@@ -335,4 +335,3 @@ function lastEagerBoundary(s: string, minIndex: number): number {
   }
   return 0;
 }
-

@@ -31,10 +31,7 @@ export class UnsignedFilterError extends Error {
 
 export class FilterPinMismatchError extends Error {
   constructor(path: string, expected: string, actual: string) {
-    super(
-      `custom filter "${path}" sha256 pin mismatch. ` +
-        `Expected ${expected}, got ${actual}.`,
-    );
+    super(`custom filter "${path}" sha256 pin mismatch. ` + `Expected ${expected}, got ${actual}.`);
     this.name = 'FilterPinMismatchError';
   }
 }

@@ -4,12 +4,12 @@ What a realistic prompt looks like before AInonymous and what the LLM actually s
 
 ## The three demos
 
-| Language | Before | After | What it shows |
-|---|---|---|---|
-| Java (Spring Boot) | [`input.md`](input.md) | [`output.md`](output.md) | Service class, reverse-domain package path, domain term "Customer", person in comment, hardcoded DB password |
+| Language                                | Before                                                               | After                                                              | What it shows                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Java (Spring Boot)                      | [`input.md`](input.md)                                               | [`output.md`](output.md)                                           | Service class, reverse-domain package path, domain term "Customer", person in comment, hardcoded DB password                                                                                                                                                                                                                                       |
 | Java (Spring Boot v1.2 Code-Obfuscator) | [`spring-boot-service-before.java`](spring-boot-service-before.java) | [`spring-boot-service-after.java`](spring-boot-service-after.java) | Medium-mode default on a realistic service class: class/type pseudonymization, reverse-domain package rewrite, `@Service`/`@Slf4j`/`@RequiredArgsConstructor` preserved, JavaBean getters (`getIduser`, `getIdproject`) preserved, compound camelCase (`subscriberId` → `muKappa`) synced to PascalCase, comment mention rewritten via session map |
-| Python (Django + DRF) | [`django-view-before.py`](django-view-before.py) | [`django-view-after.py`](django-view-after.py) | ViewSet, internal runbook URL, legal/ops mail aliases, `CUSTOMERDB_API_KEY` secret in settings reference, legacy view with bearer token in query string |
-| Go (chi + pgx) | [`go-http-handler-before.go`](go-http-handler-before.go) | [`go-http-handler-after.go`](go-http-handler-after.go) | `package`/import paths on an internal GitLab host, Postgres DSN with inline password, oncall runbook, slog fields leaking actor and partner IDs |
+| Python (Django + DRF)                   | [`django-view-before.py`](django-view-before.py)                     | [`django-view-after.py`](django-view-after.py)                     | ViewSet, internal runbook URL, legal/ops mail aliases, `CUSTOMERDB_API_KEY` secret in settings reference, legacy view with bearer token in query string                                                                                                                                                                                            |
+| Go (chi + pgx)                          | [`go-http-handler-before.go`](go-http-handler-before.go)             | [`go-http-handler-after.go`](go-http-handler-after.go)             | `package`/import paths on an internal GitLab host, Postgres DSN with inline password, oncall runbook, slog fields leaking actor and partner IDs                                                                                                                                                                                                    |
 
 ## How to read the files
 
@@ -35,17 +35,17 @@ ainonymous start --config ./examples/enterprise.ainonymous.yml
 # the proxy will forward the anonymized version, which should closely match the *-after.* file
 ```
 
-Exact pseudonyms will differ from the checked-in `-after` files (pseudonym numbering depends on the order identifiers appear in a given session), but the *shape* of the anonymization. which tokens get replaced, which stay, and which get redacted. should match.
+Exact pseudonyms will differ from the checked-in `-after` files (pseudonym numbering depends on the order identifiers appear in a given session), but the _shape_ of the anonymization. which tokens get replaced, which stay, and which get redacted. should match.
 
 ## Layer coverage across all three demos
 
-| What leaks without AInonymous | Layer | How it's handled |
-|---|---|---|
-| `hunter2topsecret!`, `hunter2staging`, `cdb_live_0000000000` | 1 Secrets | Password / API-key patterns → `***REDACTED***` (permanent, never rehydrated) |
-| `Acme Corp`, `Acme`, `acme-corp.com`, `acme.internal`, `gitlab.acme-corp.local` | 2 Identity | Company + domain pseudonyms, consistent per session |
-| `Artur Sommer`, `Kay Example`, `M. Example`, `rexample` | 2 Identity | Configured people + NER dictionary → `Person Alpha`, `Person Beta`, ... |
-| `artur.sommer@acme-gmbh.de`, `ops@acme-logistics.de` | 2 Identity | Email detection → `user1@company-alpha.de` |
-| `10.42.0.17` | 2 Identity | IPv4 pattern → `10.0.x.y` slot |
-| `com.acmecorp.customerdb.*`, `gitlab.acme-corp.local/platform/...` | 3 Code | Reverse-domain + path segments anonymized; TLD preserved |
-| `CustomerBillingService`, `AcmeCustomerLoyaltyViewSet`, `PartnerContactView` | 3 Code | Domain terms (`Customer`, `Partner`, ...) trigger compound pseudonymization; `Service`/`ViewSet`/`View` suffixes preserved |
-| `CustomerLoyalty`, `PartnerAgreement` model names | 3 Code | Same. domain term is the trigger; structural word stays |
+| What leaks without AInonymous                                                   | Layer      | How it's handled                                                                                                           |
+| ------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `hunter2topsecret!`, `hunter2staging`, `cdb_live_0000000000`                    | 1 Secrets  | Password / API-key patterns → `***REDACTED***` (permanent, never rehydrated)                                               |
+| `Acme Corp`, `Acme`, `acme-corp.com`, `acme.internal`, `gitlab.acme-corp.local` | 2 Identity | Company + domain pseudonyms, consistent per session                                                                        |
+| `Artur Sommer`, `Kay Example`, `M. Example`, `rexample`                         | 2 Identity | Configured people + NER dictionary → `Person Alpha`, `Person Beta`, ...                                                    |
+| `artur.sommer@acme-gmbh.de`, `ops@acme-logistics.de`                            | 2 Identity | Email detection → `user1@company-alpha.de`                                                                                 |
+| `10.42.0.17`                                                                    | 2 Identity | IPv4 pattern → `10.0.x.y` slot                                                                                             |
+| `com.acmecorp.customerdb.*`, `gitlab.acme-corp.local/platform/...`              | 3 Code     | Reverse-domain + path segments anonymized; TLD preserved                                                                   |
+| `CustomerBillingService`, `AcmeCustomerLoyaltyViewSet`, `PartnerContactView`    | 3 Code     | Domain terms (`Customer`, `Partner`, ...) trigger compound pseudonymization; `Service`/`ViewSet`/`View` suffixes preserved |
+| `CustomerLoyalty`, `PartnerAgreement` model names                               | 3 Code     | Same. domain term is the trigger; structural word stays                                                                    |

@@ -1,4 +1,9 @@
-import { assertDetectorPlugin, type DetectorPlugin, type DetectorContext, type DetectionHit } from './index.js';
+import {
+  assertDetectorPlugin,
+  type DetectorPlugin,
+  type DetectorContext,
+  type DetectionHit,
+} from './index.js';
 
 export interface RegisteredDetector {
   plugin: DetectorPlugin;

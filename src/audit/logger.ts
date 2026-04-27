@@ -327,10 +327,7 @@ function writeWatermark(
     atomicWriteFileSync(path, JSON.stringify(wm));
   } catch (err) {
     if (failureMode === 'block') {
-      throw new AuditPersistError(
-        `audit watermark persist failed: ${(err as Error).message}`,
-        err,
-      );
+      throw new AuditPersistError(`audit watermark persist failed: ${(err as Error).message}`, err);
     }
     console.error(
       `WARNING: audit watermark write failed at ${path}: ${(err as Error).message} - request continuing under auditFailure=permit`,
@@ -627,9 +624,7 @@ export class AuditLogger {
             return;
           }
         } catch {
-          console.error(
-            `WARNING: audit checkpoint signature unreadable; refusing to seed chain.`,
-          );
+          console.error(`WARNING: audit checkpoint signature unreadable; refusing to seed chain.`);
           return;
         }
       }
@@ -689,23 +684,22 @@ export class AuditLogger {
             );
             return;
           }
-          const macBody = wm.v === WATERMARK_VERSION_LEGACY
-            ? watermarkMacBodyLegacy({
-                audit_dir: wm.audit_dir,
-                max_seq: wm.max_seq,
-                last_hash: wm.last_hash,
-              })
-            : watermarkMacBody({
-                audit_dir: wm.audit_dir,
-                max_seq: wm.max_seq,
-                last_hash: wm.last_hash,
-                boot_id: wm.boot_id,
-              });
+          const macBody =
+            wm.v === WATERMARK_VERSION_LEGACY
+              ? watermarkMacBodyLegacy({
+                  audit_dir: wm.audit_dir,
+                  max_seq: wm.max_seq,
+                  last_hash: wm.last_hash,
+                })
+              : watermarkMacBody({
+                  audit_dir: wm.audit_dir,
+                  max_seq: wm.max_seq,
+                  last_hash: wm.last_hash,
+                  boot_id: wm.boot_id,
+                });
           const expected = hmacLine(wkey, macBody);
           if (expected !== wm.mac) {
-            console.error(
-              `WARNING: audit watermark signature mismatch; refusing to seed chain.`,
-            );
+            console.error(`WARNING: audit watermark signature mismatch; refusing to seed chain.`);
             return;
           }
         } else if (wm.boot_id !== undefined) {
@@ -752,7 +746,9 @@ export class AuditLogger {
     const keyring = this.hmacKeyring;
     const activeKid = this.activeHmacKid;
     if (typeof entry.seq !== 'number') {
-      throw new Error('persistEntry called with seq-less entry - log() must assign seq before persist');
+      throw new Error(
+        'persistEntry called with seq-less entry - log() must assign seq before persist',
+      );
     }
     const seq = entry.seq;
     try {

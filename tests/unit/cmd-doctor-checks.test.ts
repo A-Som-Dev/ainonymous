@@ -97,10 +97,14 @@ describe('doctor invariant checks', () => {
       // jsonl tail at seq=5
       writeFileSync(
         jsonl,
-        ['{"seq":0}', '{"seq":1}', '{"seq":2}', '{"seq":3}', '{"seq":4}', '{"seq":5}'].join('\n') + '\n',
+        ['{"seq":0}', '{"seq":1}', '{"seq":2}', '{"seq":3}', '{"seq":4}', '{"seq":5}'].join('\n') +
+          '\n',
       );
       // checkpoint claims seq=2 (rolled-back / stale)
-      writeFileSync(jsonl + '.checkpoint', JSON.stringify({ lastSeq: 2, lastHash: 'a'.repeat(64) }));
+      writeFileSync(
+        jsonl + '.checkpoint',
+        JSON.stringify({ lastSeq: 2, lastHash: 'a'.repeat(64) }),
+      );
       writeFileSync(join(workdir, '.ainonymous.yml'), 'audit:\n  persist_dir: ./audit\n');
 
       const result = checkAuditCheckpoint(workdir);

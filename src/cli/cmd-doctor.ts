@@ -273,7 +273,9 @@ export function checkAuditCheckpoint(dir: string): Check {
 
 function lastJsonlSeq(path: string): number | null {
   try {
-    const lines = readFileSync(path, 'utf-8').split('\n').filter((l) => l.trim());
+    const lines = readFileSync(path, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim());
     if (lines.length === 0) return null;
     const last = JSON.parse(lines[lines.length - 1]) as { seq?: unknown };
     return typeof last.seq === 'number' && Number.isInteger(last.seq) ? last.seq : null;

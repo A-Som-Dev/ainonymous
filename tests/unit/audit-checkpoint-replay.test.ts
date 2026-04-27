@@ -73,9 +73,7 @@ describe('audit checkpoint replay defense', () => {
     const writer2 = new AuditLogger();
     writer2.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /checkpoint.*(replay|rollback|stale|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /checkpoint.*(replay|rollback|stale|refus)/i.test(e))).toBe(true);
   });
 
   it('refuses a sidecar whose MAC body was bound to a different file basename', () => {
@@ -108,9 +106,7 @@ describe('audit checkpoint replay defense', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /checkpoint.*(mismatch|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /checkpoint.*(mismatch|refus)/i.test(e))).toBe(true);
   });
 
   it('rejects same-file rollback even without an HMAC key configured', () => {
@@ -129,9 +125,7 @@ describe('audit checkpoint replay defense', () => {
     const writer2 = new AuditLogger();
     writer2.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /checkpoint.*(stale|replay|behind|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /checkpoint.*(stale|replay|behind|refus)/i.test(e))).toBe(true);
   });
 
   it('warns the operator that keyless persistence has no cross-file replay defence', () => {
@@ -173,9 +167,7 @@ describe('audit checkpoint replay defense', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /v1|legacy|version|refus/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /v1|legacy|version|refus/i.test(e))).toBe(true);
   });
 
   it('refuses to seed when the jsonl tail is corrupted (keyless mode)', () => {
@@ -197,9 +189,7 @@ describe('audit checkpoint replay defense', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /(corrupt|unparsable|tail|tamper|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /(corrupt|unparsable|tail|tamper|refus)/i.test(e))).toBe(true);
   });
 
   it('refuses to seed when jsonl is empty but checkpoint claims lastSeq>0', () => {
@@ -219,9 +209,7 @@ describe('audit checkpoint replay defense', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /(empty|missing.*entries|state|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /(empty|missing.*entries|state|refus)/i.test(e))).toBe(true);
   });
 
   it('refuses a forged lastSeq=0 checkpoint paired with an empty jsonl tail (keyless replay)', () => {
@@ -248,7 +236,10 @@ describe('audit checkpoint replay defense', () => {
     // If the seed was refused, the new entry must start a fresh chain at
     // seq=0 with an empty prevHash. If the bypass succeeded the logger
     // would have kept the forged seq=0+1=1 with prevHash='a'.repeat(64).
-    const lines = readFileSync(jsonl, 'utf-8').trim().split('\n').filter((l) => l);
+    const lines = readFileSync(jsonl, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter((l) => l);
     const last = JSON.parse(lines[lines.length - 1]) as { seq: number; prevHash: string };
     expect(last.seq).toBe(0);
     expect(last.prevHash).toBe('');

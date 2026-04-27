@@ -2,12 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import type { AuditEntry } from '../types.js';
-import {
-  verifyAuditChain,
-  resolveAuditHmacKeyring,
-  hmacLine,
-  DEFAULT_HMAC_KID,
-} from './logger.js';
+import { verifyAuditChain, resolveAuditHmacKeyring, hmacLine, DEFAULT_HMAC_KID } from './logger.js';
 
 export type VerifyReason =
   | 'read-error'

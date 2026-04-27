@@ -14,13 +14,15 @@ describe('plugin-api assertDetectorPlugin', () => {
   });
 
   it('rejects an object without id', () => {
-    expect(() => assertDetectorPlugin({ version: '1.0.0', capabilities: [], detect: () => [] })).toThrow(/id/);
+    expect(() =>
+      assertDetectorPlugin({ version: '1.0.0', capabilities: [], detect: () => [] }),
+    ).toThrow(/id/);
   });
 
   it('rejects a plugin without detect()', () => {
-    expect(() =>
-      assertDetectorPlugin({ id: 'x', version: '1.0.0', capabilities: [] }),
-    ).toThrow(/detect/);
+    expect(() => assertDetectorPlugin({ id: 'x', version: '1.0.0', capabilities: [] })).toThrow(
+      /detect/,
+    );
   });
 
   it('rejects non-object inputs', () => {
@@ -30,7 +32,12 @@ describe('plugin-api assertDetectorPlugin', () => {
 
   it('rejects ids that contain a colon (would defeat namespace-disable)', () => {
     expect(() =>
-      assertDetectorPlugin({ id: 'plugin:fake', version: '1.0.0', capabilities: [], detect: () => [] }),
+      assertDetectorPlugin({
+        id: 'plugin:fake',
+        version: '1.0.0',
+        capabilities: [],
+        detect: () => [],
+      }),
     ).toThrow(/id/i);
   });
 
@@ -39,19 +46,34 @@ describe('plugin-api assertDetectorPlugin', () => {
       assertDetectorPlugin({ id: 'BadCase', version: '1.0.0', capabilities: [], detect: () => [] }),
     ).toThrow(/id/i);
     expect(() =>
-      assertDetectorPlugin({ id: 'has space', version: '1.0.0', capabilities: [], detect: () => [] }),
+      assertDetectorPlugin({
+        id: 'has space',
+        version: '1.0.0',
+        capabilities: [],
+        detect: () => [],
+      }),
     ).toThrow(/id/i);
   });
 
   it('rejects ids longer than 64 chars', () => {
     expect(() =>
-      assertDetectorPlugin({ id: 'a'.repeat(65), version: '1.0.0', capabilities: [], detect: () => [] }),
+      assertDetectorPlugin({
+        id: 'a'.repeat(65),
+        version: '1.0.0',
+        capabilities: [],
+        detect: () => [],
+      }),
     ).toThrow(/id/i);
   });
 
   it('accepts kebab-case, dot-segment and underscore ids', () => {
     expect(() =>
-      assertDetectorPlugin({ id: 'org.acme.scanner_v1', version: '1.0.0', capabilities: [], detect: () => [] }),
+      assertDetectorPlugin({
+        id: 'org.acme.scanner_v1',
+        version: '1.0.0',
+        capabilities: [],
+        detect: () => [],
+      }),
     ).not.toThrow();
     expect(() =>
       assertDetectorPlugin({ id: 'a-b-c', version: '1.0.0', capabilities: [], detect: () => [] }),
@@ -105,9 +127,7 @@ describe('DetectorRegistry.register asserts plugin shape', () => {
     const evil: Record<string, unknown> = {
       version: '1.0.0',
       capabilities: ['secrets'],
-      detect: () => [
-        { type: 'apikey', offset: 0, length: 1, match: 'x' },
-      ],
+      detect: () => [{ type: 'apikey', offset: 0, length: 1, match: 'x' }],
     };
     Object.defineProperty(evil, 'id', {
       get(): string {

@@ -9,15 +9,13 @@ describe('assertSafeBrowserUrl', () => {
   });
 
   it('accepts localhost host', () => {
-    expect(() =>
-      assertSafeBrowserUrl('http://localhost:8100/dashboard'),
-    ).not.toThrow();
+    expect(() => assertSafeBrowserUrl('http://localhost:8100/dashboard')).not.toThrow();
   });
 
   it('rejects https scheme', () => {
-    expect(() =>
-      assertSafeBrowserUrl('https://127.0.0.1:8100/dashboard'),
-    ).toThrow(/scheme|protocol/i);
+    expect(() => assertSafeBrowserUrl('https://127.0.0.1:8100/dashboard')).toThrow(
+      /scheme|protocol/i,
+    );
   });
 
   it('rejects file:// scheme', () => {
@@ -31,21 +29,21 @@ describe('assertSafeBrowserUrl', () => {
   it('rejects URL containing shell-metacharacter ampersand even after URL parsing', () => {
     // Operator-supplied mgmt token of `ab&calc.exe` would otherwise let
     // `cmd /c start` execute calc.exe via shell-meta-interpretation.
-    expect(() =>
-      assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=ab&calc.exe'),
-    ).toThrow(/metacharacter|shell/i);
+    expect(() => assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=ab&calc.exe')).toThrow(
+      /metacharacter|shell/i,
+    );
   });
 
   it('rejects pipe character', () => {
-    expect(() =>
-      assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a|b'),
-    ).toThrow(/metacharacter|shell/i);
+    expect(() => assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a|b')).toThrow(
+      /metacharacter|shell/i,
+    );
   });
 
   it('rejects backtick injection', () => {
-    expect(() =>
-      assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a`b'),
-    ).toThrow(/metacharacter|shell/i);
+    expect(() => assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a`b')).toThrow(
+      /metacharacter|shell/i,
+    );
   });
 
   it('rejects caret cmd-escape', () => {
@@ -57,14 +55,12 @@ describe('assertSafeBrowserUrl', () => {
   });
 
   it('rejects cmd grouping parentheses', () => {
-    expect(() =>
-      assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a(b)c'),
-    ).toThrow(/metacharacter|shell/i);
+    expect(() => assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard?token=a(b)c')).toThrow(
+      /metacharacter|shell/i,
+    );
   });
 
   it('rejects embedded CRLF', () => {
-    expect(() =>
-      assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard\r\ncalc.exe'),
-    ).toThrow();
+    expect(() => assertSafeBrowserUrl('http://127.0.0.1:8100/dashboard\r\ncalc.exe')).toThrow();
   });
 });

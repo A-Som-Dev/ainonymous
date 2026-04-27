@@ -1,16 +1,16 @@
 (function () {
   var statEls = {
-    secrets:  document.getElementById('statSecrets'),
+    secrets: document.getElementById('statSecrets'),
     identity: document.getElementById('statIdentity'),
-    code:     document.getElementById('statCode'),
-    total:    document.getElementById('statTotal'),
+    code: document.getElementById('statCode'),
+    total: document.getElementById('statTotal'),
   };
-  var statusDot  = document.getElementById('statusDot');
+  var statusDot = document.getElementById('statusDot');
   var statusText = document.getElementById('statusText');
-  var eventBody  = document.getElementById('eventBody');
+  var eventBody = document.getElementById('eventBody');
   var entryCount = document.getElementById('entryCount');
-  var rowCount   = 0;
-  var MAX_ROWS   = 200;
+  var rowCount = 0;
+  var MAX_ROWS = 200;
 
   function formatTime(ts) {
     var d = new Date(ts);
@@ -21,10 +21,10 @@
   }
 
   function updateStats(data) {
-    statEls.secrets.textContent  = data.secrets;
+    statEls.secrets.textContent = data.secrets;
     statEls.identity.textContent = data.identity;
-    statEls.code.textContent     = data.code;
-    statEls.total.textContent    = data.total;
+    statEls.code.textContent = data.code;
+    statEls.total.textContent = data.total;
   }
 
   function addEntry(entry) {
@@ -64,7 +64,9 @@
 
     entryCount.textContent = rowCount + ' entries';
 
-    setTimeout(function () { tr.classList.remove('new-row'); }, 350);
+    setTimeout(function () {
+      tr.classList.remove('new-row');
+    }, 350);
   }
 
   function connect() {

@@ -15,11 +15,11 @@ npx vitest run tests/performance/benchmark.test.ts --reporter=verbose
 
 ## Results
 
-| Scenario | Payload | Runs | p50 | p95 | Notes |
-|---|---|---:|---:|---:|---|
-| `pipeline.anonymize()` small | 55 chars, 1 class + 1 password | 20 | **96 ms** | 128 ms | Dominated by Tree-sitter WASM identifier extraction |
-| `pipeline.anonymize()` medium | 1819 chars, 20x repeated class | 20 | **141 ms** | 182 ms | AST cost scales sub-linearly, regex/replace adds a tail |
-| `pipeline.rehydrate()` | SSE-sized 50-chunk response | 100 | **0.22 ms** | 0.35 ms | Offset-based single pass with pure-original protection |
+| Scenario                      | Payload                        | Runs |         p50 |     p95 | Notes                                                   |
+| ----------------------------- | ------------------------------ | ---: | ----------: | ------: | ------------------------------------------------------- |
+| `pipeline.anonymize()` small  | 55 chars, 1 class + 1 password |   20 |   **96 ms** |  128 ms | Dominated by Tree-sitter WASM identifier extraction     |
+| `pipeline.anonymize()` medium | 1819 chars, 20x repeated class |   20 |  **141 ms** |  182 ms | AST cost scales sub-linearly, regex/replace adds a tail |
+| `pipeline.rehydrate()`        | SSE-sized 50-chunk response    |  100 | **0.22 ms** | 0.35 ms | Offset-based single pass with pure-original protection  |
 
 Variance across runs sits in the 10-20 ms band for anonymize (shared-tenant CPU jitter) and under ±0.05 ms for rehydrate.
 
@@ -46,11 +46,11 @@ The "~95% fewer findings on medium vs high" number in the README is a coarse
 aggregate across the real-world repos we use in testing. It is not a claim
 about any specific codebase.
 
-| Repository | Layer 3 findings (high) | Layer 3 findings (medium) | Reduction |
-|---|---:|---:|---:|
-| Java Spring monolith (internal, ~40 files) | 812 | 41 | ~95 % |
-| Python Flask API (internal, ~25 files) | 430 | 22 | ~95 % |
-| Kotlin infra tooling (internal, ~30 files) | 611 | 35 | ~94 % |
+| Repository                                 | Layer 3 findings (high) | Layer 3 findings (medium) | Reduction |
+| ------------------------------------------ | ----------------------: | ------------------------: | --------: |
+| Java Spring monolith (internal, ~40 files) |                     812 |                        41 |     ~95 % |
+| Python Flask API (internal, ~25 files)     |                     430 |                        22 |     ~95 % |
+| Kotlin infra tooling (internal, ~30 files) |                     611 |                        35 |     ~94 % |
 
 The drop comes from medium skipping framework-whitelisted identifiers
 (`SpringApplication`, `@Autowired`, `@Repository`, etc.) that high still
@@ -74,10 +74,10 @@ see a smaller gap because the whitelist hits less often.
 
 These are the targets asserted in the test suite:
 
-| Test | Budget | Typical p50 |
-|---|---|---|
-| Small anonymize | < 500 ms | 96 ms |
-| Medium anonymize | < 500 ms | 141 ms |
-| Rehydrate | < 5 ms | 0.22 ms |
+| Test             | Budget   | Typical p50 |
+| ---------------- | -------- | ----------- |
+| Small anonymize  | < 500 ms | 96 ms       |
+| Medium anonymize | < 500 ms | 141 ms      |
+| Rehydrate        | < 5 ms   | 0.22 ms     |
 
 The generous budget reflects real-world CI variance (GitHub runners hit 250-400 ms for the same payload due to shared-tenant CPU). If you tighten the budget, expect occasional flakes on cold CI machines.

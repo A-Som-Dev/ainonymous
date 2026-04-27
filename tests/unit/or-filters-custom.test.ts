@@ -2,10 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  loadCustomFilters,
-  UnsignedFilterError,
-} from '../../src/patterns/or-filters/loader.js';
+import { loadCustomFilters, UnsignedFilterError } from '../../src/patterns/or-filters/loader.js';
 import { selectFilters, BUILT_IN_OR_FILTERS } from '../../src/patterns/or-filters/index.js';
 
 describe('or-filters custom loader', () => {
@@ -21,11 +18,7 @@ describe('or-filters custom loader', () => {
 
   it('refuses to load an unsigned local filter without allow_unsigned_local', async () => {
     const p = join(dir, 'my-filter.mjs');
-    writeFileSync(
-      p,
-      `export default { id: 'my-filter', accept: () => true };`,
-      'utf-8',
-    );
+    writeFileSync(p, `export default { id: 'my-filter', accept: () => true };`, 'utf-8');
     await expect(
       loadCustomFilters([{ path: p, allowUnsignedLocal: false }], dir),
     ).rejects.toBeInstanceOf(UnsignedFilterError);
@@ -50,9 +43,9 @@ describe('or-filters custom loader', () => {
   it('rejects a filter missing the id field', async () => {
     const p = join(dir, 'bad.mjs');
     writeFileSync(p, `export default { accept: () => true };`, 'utf-8');
-    await expect(
-      loadCustomFilters([{ path: p, allowUnsignedLocal: true }], dir),
-    ).rejects.toThrow(/id/);
+    await expect(loadCustomFilters([{ path: p, allowUnsignedLocal: true }], dir)).rejects.toThrow(
+      /id/,
+    );
   });
 
   it('selectFilters drops built-ins listed in disable and appends extras', () => {

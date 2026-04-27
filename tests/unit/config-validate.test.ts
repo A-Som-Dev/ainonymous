@@ -123,7 +123,11 @@ describe('config validation', () => {
 
   it('accepts detectors.custom_pins and detectors.disable as known fields', () => {
     const issues = validateRawConfig({
-      detectors: { custom: ['./d.mjs'], custom_pins: { './d.mjs': 'b'.repeat(64) }, disable: ['x'] },
+      detectors: {
+        custom: ['./d.mjs'],
+        custom_pins: { './d.mjs': 'b'.repeat(64) },
+        disable: ['x'],
+      },
     });
     const unknown = issues.filter((i) => i.path.startsWith('detectors.'));
     expect(unknown).toEqual([]);

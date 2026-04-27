@@ -104,11 +104,9 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) =>
-        /watermark|rollback|external|state.*ahead|refus/i.test(e),
-      ),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark|rollback|external|state.*ahead|refus/i.test(e))).toBe(
+      true,
+    );
   });
 
   it('seeds normally when the watermark matches the checkpoint', () => {
@@ -141,18 +139,14 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /watermark.*(missing|deleted|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark.*(missing|deleted|refus)/i.test(e))).toBe(true);
   });
 
   it('still allows a clean first boot (no jsonl, no watermark) without complaining', () => {
     process.env[ENV_KEY] = makeKey();
     const fresh = new AuditLogger();
     fresh.enablePersistence(workdir);
-    expect(
-      errors.some((e) => /watermark.*(missing|deleted|refus)/i.test(e)),
-    ).toBe(false);
+    expect(errors.some((e) => /watermark.*(missing|deleted|refus)/i.test(e))).toBe(false);
   });
 
   it('AINONYMOUS_AUDIT_NO_WATERMARK does not bypass watermark verification when one exists', () => {
@@ -171,9 +165,7 @@ describe('audit external watermark', () => {
       const restart = new AuditLogger();
       restart.enablePersistence(workdir);
 
-      expect(
-        errors.some((e) => /watermark.*(mac|signature|mismatch|refus)/i.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /watermark.*(mac|signature|mismatch|refus)/i.test(e))).toBe(true);
     } finally {
       delete process.env['AINONYMOUS_AUDIT_NO_WATERMARK'];
     }
@@ -191,9 +183,7 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /watermark.*(corrupt|unreadable|truncat|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark.*(corrupt|unreadable|truncat|refus)/i.test(e))).toBe(true);
   });
 
   it('refuses a watermark with an unsupported schema version', () => {
@@ -212,9 +202,7 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /watermark.*(version|schema|99|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark.*(version|schema|99|refus)/i.test(e))).toBe(true);
   });
 
   it('emits a one-shot NOTICE when AINONYMOUS_AUDIT_NO_WATERMARK skips a write', () => {
@@ -255,9 +243,9 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /watermark.*(missing.*signature|HMAC is configured)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark.*(missing.*signature|HMAC is configured)/i.test(e))).toBe(
+      true,
+    );
   });
 
   it('refuses when the watermark MAC does not verify (HMAC mode)', () => {
@@ -275,8 +263,6 @@ describe('audit external watermark', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /watermark.*(mac|signature|mismatch|refus)/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /watermark.*(mac|signature|mismatch|refus)/i.test(e))).toBe(true);
   });
 });

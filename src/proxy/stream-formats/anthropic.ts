@@ -1,10 +1,6 @@
 import type { AnthropicDeltaKind } from './types.js';
 
-export function buildAnthropicDelta(
-  index: number,
-  text: string,
-  kind: AnthropicDeltaKind,
-): string {
+export function buildAnthropicDelta(index: number, text: string, kind: AnthropicDeltaKind): string {
   let delta: Record<string, unknown>;
   if (kind === 'input_json_delta') {
     delta = { type: 'input_json_delta', partial_json: text };

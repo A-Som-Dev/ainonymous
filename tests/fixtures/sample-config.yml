@@ -6,9 +6,9 @@ secrets:
       regex: "ASOM_[A-Z_]+_KEY=[^\\s]+"
 
 identity:
-  company: "Asom GmbH"
-  domains: ["asom.de", "asom.internal"]
-  people: ["Artur Sommer"]
+  company: 'Asom GmbH'
+  domains: ['asom.de', 'asom.internal']
+  people: ['Artur Sommer']
 
 code:
   language: typescript

@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 1.4.x   | Yes       |
-| 1.3.x   | Yes (until 1.5.x) |
-| 1.2.x   | No (upgrade to 1.4.x) |
-| 1.1.x   | No (upgrade to 1.4.x) |
+| Version | Supported                                |
+| ------- | ---------------------------------------- |
+| 1.4.x   | Yes                                      |
+| 1.3.x   | Yes (until 1.5.x)                        |
+| 1.2.x   | No (upgrade to 1.4.x)                    |
+| 1.1.x   | No (upgrade to 1.4.x)                    |
 | 1.0.x   | No (unpublished; use `ainonymous@1.4.x`) |
 
 ## Reporting a Vulnerability
@@ -21,12 +21,14 @@ This is a solo-maintained project. responses are best-effort, typically within a
 ## Scope
 
 In scope:
+
 - Data leakage through the proxy (original data reaching upstream APIs)
 - Session map confidentiality weaknesses
 - Authentication bypass on shutdown/dashboard endpoints
 - Dependency vulnerabilities in the supply chain. `openredaction`, `tree-sitter-wasms`, and `web-tree-sitter` are pinned to exact versions: they control detection logic and grammar definitions respectively, so a seemingly innocuous patch release could silently change what gets anonymized. `commander` and `js-yaml` remain on caret ranges because their API surface is stable and heavily reviewed.
 
 Out of scope:
+
 - Attacks requiring local system access (the proxy runs locally by design)
 - Denial of service on the local proxy
 - Issues in upstream LLM APIs
@@ -120,6 +122,7 @@ Starting with the GitHub Actions release workflow, every release is signed with 
 ### What is published
 
 Each GitHub Release attaches:
+
 - `ainonymous-<version>.tgz`. tarball produced by `npm pack` in the release workflow
 - `ainonymous-<version>.tgz.sha256`. SHA-256 checksum
 - `ainonymous-<version>.tgz.sigstore.json`. Sigstore bundle (signature + certificate + transparency log proof)
@@ -171,9 +174,9 @@ The public [Rekor](https://rekor.sigstore.dev/) transparency log is append-only.
 
 Since v1.2.2 the release workflow has been reordered (publish-before-sign) and a tag-vs-package.json gate runs both locally (pre-push hook) and in CI. Orphan entries can no longer be produced by the happy path. The pre-v1.2.2 orphans stay visible in Rekor forever and are listed here so auditors can cross-check them:
 
-| Rekor index | Tag       | Reason                                         |
-|-------------|-----------|------------------------------------------------|
-| 1340775699  | v1.2.0    | Initial v1.2.0 tag pushed with package.json still on 1.1.3. `npm publish` rejected with 403, Sigstore attestation already committed. Re-release fixed the version bump; the rejected digest remains orphan in Rekor. |
+| Rekor index | Tag    | Reason                                                                                                                                                                                                               |
+| ----------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1340775699  | v1.2.0 | Initial v1.2.0 tag pushed with package.json still on 1.1.3. `npm publish` rejected with 403, Sigstore attestation already committed. Re-release fixed the version bump; the rejected digest remains orphan in Rekor. |
 
 To verify: fetch the Rekor entry with `cosign tree ainonymous@1.2.0` and note two entries. The one that does NOT correspond to the npm-published sha512 is the orphan. The signer identity (GitHub Actions OIDC from this repository) is the same on both. Consumers of `npm install ainonymous@1.2.0` only ever see the published, `npm audit signatures`-verifiable one.
 
@@ -196,7 +199,7 @@ Confidentiality model:
 
 When in doubt: leave `session.persist: false`. The feature exists for continuity, not for audit retention.
 
-**Pseudonym collision guard.** Since v1.2 the BiMap's `set()` throws when a second *different* original tries to bind to an existing pseudonym. `PseudoGen` cycles 24 Greek letters and then appends numeric suffixes, so a long-running persisted DB can, in principle, generate the same pseudonym for two unrelated originals across restarts. Without the guard the reverse map would silently be overwritten and `rehydrate()` would return the wrong original for the winner pseudonym. If you hit this exception in production: restart the proxy and rotate `AINONYMOUS_SESSION_KEY` (fresh key → fresh DB state → fresh generator).
+**Pseudonym collision guard.** Since v1.2 the BiMap's `set()` throws when a second _different_ original tries to bind to an existing pseudonym. `PseudoGen` cycles 24 Greek letters and then appends numeric suffixes, so a long-running persisted DB can, in principle, generate the same pseudonym for two unrelated originals across restarts. Without the guard the reverse map would silently be overwritten and `rehydrate()` would return the wrong original for the winner pseudonym. If you hit this exception in production: restart the proxy and rotate `AINONYMOUS_SESSION_KEY` (fresh key → fresh DB state → fresh generator).
 
 **Audit-log truncation detection.** The hash chain alone stays internally consistent when an attacker with write access removes the tail of a `ainonymous-audit-YYYY-MM-DD.jsonl` file. Since v1.2 a sidecar `<file>.checkpoint` is written after every entry with `{lastSeq, lastHash}`. `verifyAuditChain(lines, expected)` takes the checkpoint as a required second input and reports tampering when the tail of the file no longer matches. Operators that script audit verification must pass `expected: 'required'` (or the parsed checkpoint) rather than the optional-mode default, otherwise a concurrent delete of both the JSONL tail and the checkpoint would still verify clean.
 
@@ -207,7 +210,7 @@ The chain-check alone is a **consistency** check, not cryptographic tamper-evide
 1. **Checkpoint MAC v=2** binds `{ckpt-blob, seq, file-basename}`. v=1 sidecars are refused outright; cross-file replay (sidecar copied from a sibling jsonl) breaks the basename binding.
 2. **JSONL tail-seq compare** runs even without HMAC. `seedFromCheckpoint` refuses if `checkpoint.lastSeq` is behind the actual jsonl tail (same-file rollback) or if the tail is unparseable (treated as tamper-evidence).
 3. **External watermark** lives in `$AINONYMOUS_STATE_HOME/audit-state/<first-32-hex-chars-of-sha256(audit_dir)>.json` (default `~/.ainonymous`), MAC-bound to `{v, audit_dir, max_seq, last_hash}`. Atomic 3-tuple rollback (jsonl + ckpt + ckpt.hmac) is detected because the watermark stays at the higher seq. The watermark is written via write-then-rename to avoid torn-file false negatives. `seedFromCheckpoint` also refuses unconditionally if the watermark is missing while a checkpoint exists (deletion attack), and refuses if the watermark JSON is unparseable (treated as tamper-evidence). The earlier `lastSeq>0` shortcut was removed in commit `e030133` to close the keyless `lastSeq=0` forge bypass.
-4. **Strict env scope.** `AINONYMOUS_AUDIT_NO_WATERMARK=1` only gates the *write* side (for tests / ephemeral runs). The read-side verification runs unconditionally so a single env flag cannot silently disable the defense in production. **Operator footgun**: a process that ran with `NO_WATERMARK=1` and then restarts without it will refuse to seed (the watermark is now genuinely missing, and the read side cannot tell that apart from a deletion attack). Either keep the env consistent across the lifetime of an audit directory or run `audit verify --reset-watermark` after a deliberate clean state. The logger emits a one-shot NOTICE at the first skipped write so the situation is visible.
+4. **Strict env scope.** `AINONYMOUS_AUDIT_NO_WATERMARK=1` only gates the _write_ side (for tests / ephemeral runs). The read-side verification runs unconditionally so a single env flag cannot silently disable the defense in production. **Operator footgun**: a process that ran with `NO_WATERMARK=1` and then restarts without it will refuse to seed (the watermark is now genuinely missing, and the read side cannot tell that apart from a deletion attack). Either keep the env consistent across the lifetime of an audit directory or run `audit verify --reset-watermark` after a deliberate clean state. The logger emits a one-shot NOTICE at the first skipped write so the situation is visible.
 
 **Known limitation - 4-tuple atomic rollback (keyless mode).** Without `AINONYMOUS_AUDIT_HMAC_KEY` the watermark itself is written without a MAC. A dual-write attacker (audit_dir + state-home) can stage any of three equivalent attacks: (1) delete the watermark and forge a `lastSeq=0` checkpoint, (2) forge a fake jsonl + matching checkpoint + matching watermark with `max_seq=0`, or (3) roll back all four artefacts atomically. The startup banner makes this explicit: "keyless mode is advisory only; configure the HMAC key for full RT-02 mitigation." Operators that need replay defense in a dual-write threat model **must** configure HMAC.
 

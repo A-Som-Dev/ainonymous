@@ -1850,10 +1850,7 @@ export function runCamelCaseSplitStage(text: string, acc: StageAccumulator): voi
     for (let i = 0; i < parts.length - 1; i++) {
       const rawA = parts[i];
       const rawB = parts[i + 1];
-      if (
-        PROGRAMMING_NOUNS.has(rawA.toLowerCase()) ||
-        PROGRAMMING_NOUNS.has(rawB.toLowerCase())
-      ) {
+      if (PROGRAMMING_NOUNS.has(rawA.toLowerCase()) || PROGRAMMING_NOUNS.has(rawB.toLowerCase())) {
         continue;
       }
       const a = cap(rawA);

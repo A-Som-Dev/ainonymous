@@ -100,16 +100,12 @@ describe('config loader', () => {
     }
 
     it('refuses a config with duplicate top-level keys', () => {
-      dir = writeYaml(
-        'version: 1\ndetectors:\n  disable: ["a"]\ndetectors:\n  disable: ["b"]\n',
-      );
+      dir = writeYaml('version: 1\ndetectors:\n  disable: ["a"]\ndetectors:\n  disable: ["b"]\n');
       expect(() => loadConfig(dir!)).toThrow(/duplicate.*key|conflicting/i);
     });
 
     it('refuses a config with duplicate nested keys', () => {
-      dir = writeYaml(
-        'version: 1\nfilters:\n  custom: ["./a.mjs"]\n  custom: ["./b.mjs"]\n',
-      );
+      dir = writeYaml('version: 1\nfilters:\n  custom: ["./a.mjs"]\n  custom: ["./b.mjs"]\n');
       expect(() => loadConfig(dir!)).toThrow(/duplicate.*key|conflicting/i);
     });
   });

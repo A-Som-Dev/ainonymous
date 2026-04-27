@@ -5,7 +5,7 @@ Config: see `gen.mjs` (company Acme Corp, domains acme-corp.com/acme-corp.local,
 
 After three-layer anonymization:
 
-```
+````
 Please refactor this Spring Boot service for RhoSigma at Alpha:
 
 ```Epsilon
@@ -31,11 +31,11 @@ public class BetaGammaService {
         System.out.println("Processing invoice for " + customer.getEmail());
     }
 }
-```
+````
 
 The Eta is Theta Alpha, Iota him at user1@company-alpha.de.
 
-```
+````
 
 ## What changed
 
@@ -55,4 +55,4 @@ Rehydration would reverse all pseudonyms when the response comes back through th
 ```bash
 npm run build
 node examples/before-after/gen.mjs
-```
+````

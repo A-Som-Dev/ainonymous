@@ -88,7 +88,15 @@ const ALLOWED_EMAIL_DOMAINS = new Set([
 // Reserved / private TLDs that are safe by definition (RFC 2606, RFC 6761,
 // RFC 6762) plus widely-used corporate internal suffixes. An email or host on
 // these can never resolve on the public internet.
-const ALLOWED_TLD_SUFFIXES = ['.local', '.test', '.example', '.invalid', '.internal', '.localhost', '.tld'];
+const ALLOWED_TLD_SUFFIXES = [
+  '.local',
+  '.test',
+  '.example',
+  '.invalid',
+  '.internal',
+  '.localhost',
+  '.tld',
+];
 
 function loadDenylist() {
   const path = resolve(process.cwd(), '.ainonymity-denylist.local');
@@ -121,12 +129,18 @@ function getChangedFiles(mode, range) {
 function getFileContent(mode, range, file) {
   try {
     if (mode === 'staged') {
-      return execSync(`git show :${JSON.stringify(file)}`, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return execSync(`git show :${JSON.stringify(file)}`, {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      });
     }
     // Compare between the two sides of a range: we want the "after" side,
     // i.e. the HEAD (or right-hand ref) version of the file.
     const rightRef = range.includes('..') ? range.split('..').pop() : range;
-    return execSync(`git show ${rightRef}:${JSON.stringify(file)}`, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return execSync(`git show ${rightRef}:${JSON.stringify(file)}`, {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
   } catch {
     return '';
   }
@@ -255,7 +269,11 @@ const LOW_SEVERITY_TYPES = new Set([
 ]);
 
 function isTestPath(file) {
-  return /^(tests?|__tests?__|spec)\//.test(file) || /\.test\.[tj]sx?$/.test(file) || /\.spec\.[tj]sx?$/.test(file);
+  return (
+    /^(tests?|__tests?__|spec)\//.test(file) ||
+    /\.test\.[tj]sx?$/.test(file) ||
+    /\.spec\.[tj]sx?$/.test(file)
+  );
 }
 
 function scanText(file, line, text, denylist) {
@@ -355,12 +373,16 @@ function main() {
     process.exit(0);
   }
 
-  console.error(`${RED}${BOLD}ainonymous scanner: ${findings.length} finding(s) in ${new Set(findings.map(f => f.file)).size} file(s)${RESET}`);
+  console.error(
+    `${RED}${BOLD}ainonymous scanner: ${findings.length} finding(s) in ${new Set(findings.map((f) => f.file)).size} file(s)${RESET}`,
+  );
   for (const f of findings) {
     console.error(`  ${RED}${f.type}${RESET} ${f.file}:${f.line}  ${YELLOW}${f.snippet}${RESET}`);
   }
   console.error('');
-  console.error(`${BOLD}Commit/push blocked.${RESET} Remove the sensitive data or, if truly a false positive,`);
+  console.error(
+    `${BOLD}Commit/push blocked.${RESET} Remove the sensitive data or, if truly a false positive,`,
+  );
   console.error(`append \`# ainonymous:allow\` to the specific line. Never allow real secrets.`);
   process.exit(1);
 }

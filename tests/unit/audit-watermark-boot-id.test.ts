@@ -1,11 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  mkdtempSync,
-  rmSync,
-  readFileSync,
-  writeFileSync,
-  readdirSync,
-} from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, createHmac } from 'node:crypto';
@@ -157,8 +151,6 @@ describe('audit watermark boot-id witness', () => {
     const restart = new AuditLogger();
     restart.enablePersistence(workdir);
 
-    expect(
-      errors.some((e) => /boot_id.*differs/i.test(e) && /HMAC/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /boot_id.*differs/i.test(e) && /HMAC/i.test(e))).toBe(true);
   });
 });

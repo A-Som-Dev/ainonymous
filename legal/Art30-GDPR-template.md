@@ -85,13 +85,13 @@ Die Verzeichnispflicht entfällt für Unternehmen und Einrichtungen mit weniger 
 
 ### 6. Vorgesehene Fristen für die Löschung der verschiedenen Datenkategorien (Art. 30 Abs. 1 lit. f)
 
-| Datenkategorie | Speicherdauer | Begründung |
-|----------------|---------------|------------|
-| Request- und Response-Logs (AInonymous) | _[z.B. 30 Tage]_ | Fehleranalyse, Missbrauchserkennung |
-| Audit-Log (SHA-256-Hash-Chain) | _[z.B. 12 Monate]_ | Nachweis nach Art. 5 Abs. 2, anschließend anonymisierte Archivierung |
-| Session-Map (Pseudonym-Mapping) | Prozess-Ende; bei Persistenz (optional ab v1.1) gemäß _[...]_ | Rehydration notwendig während aktiver Session |
-| Prompts und Responses beim LLM-Anbieter | Gemäß DPA des Anbieters, z.B. _[Anthropic: Details siehe Auftragsverarbeitungsvertrag]_ | Vertraglich vereinbart |
-| Nutzungsmetriken (aggregiert, anonym) | _[z.B. unbegrenzt]_ | Statistische Auswertung |
+| Datenkategorie                          | Speicherdauer                                                                           | Begründung                                                           |
+| --------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Request- und Response-Logs (AInonymous) | _[z.B. 30 Tage]_                                                                        | Fehleranalyse, Missbrauchserkennung                                  |
+| Audit-Log (SHA-256-Hash-Chain)          | _[z.B. 12 Monate]_                                                                      | Nachweis nach Art. 5 Abs. 2, anschließend anonymisierte Archivierung |
+| Session-Map (Pseudonym-Mapping)         | Prozess-Ende; bei Persistenz (optional ab v1.1) gemäß _[...]_                           | Rehydration notwendig während aktiver Session                        |
+| Prompts und Responses beim LLM-Anbieter | Gemäß DPA des Anbieters, z.B. _[Anthropic: Details siehe Auftragsverarbeitungsvertrag]_ | Vertraglich vereinbart                                               |
+| Nutzungsmetriken (aggregiert, anonym)   | _[z.B. unbegrenzt]_                                                                     | Statistische Auswertung                                              |
 
 Verfahren zur Löschung: _[Automatisiert / manuell, Verweis auf Löschkonzept]_.
 
@@ -100,31 +100,37 @@ Verfahren zur Löschung: _[Automatisiert / manuell, Verweis auf Löschkonzept]_.
 Verweis auf das TOM-Dokument bzw. Anhang. Die folgenden Maßnahmen sind bei Einsatz von AInonymous mindestens zu adressieren:
 
 **Pseudonymisierung und Anonymisierung**:
+
 - AInonymous 3-Layer-Pipeline: Secrets-Redaction, Identity-Pseudonymisierung, Code-Semantik-Pseudonymisierung
 - Bidirektionale Session-Map für konsistente Pseudonyme pro Session
 - Domain-aware Pseudonymisierung (strukturelle Teile bleiben, Domain-Teile werden ersetzt)
 
 **Verschlüsselung**:
+
 - AES-256-GCM für persistierte Session-Maps (sofern aktiviert)
 - TLS 1.3 für Transport zum LLM-Upstream
 - Verschlüsselung ruhender Daten auf Anwendungsservern: _[...]_
 
 **Vertraulichkeit**:
+
 - Zugangsbeschränkung zum Proxy (Bind auf 127.0.0.1 standardmäßig)
 - Authentifizierung der API-Nutzer: _[...]_
 - Rollen- und Berechtigungskonzept: _[Verweis]_
 
 **Integrität**:
+
 - Audit-Log mit SHA-256-Hash-Chain (Manipulationserkennung)
 - Versionskontrolle der Konfiguration
 - Code-Signierung: _[sofern eingesetzt]_
 
 **Verfügbarkeit und Belastbarkeit**:
+
 - Backup-Strategie: _[...]_
 - Wiederherstellungszeit: _[RTO, RPO]_
 - Redundanz: _[...]_
 
 **Verfahren zur regelmäßigen Überprüfung, Bewertung und Evaluierung**:
+
 - PDCA-Zyklus: _[Intervalle]_
 - Penetrationstests: _[Frequenz]_
 - Datenschutz-Folgenabschätzung nach Art. 35 (sofern erforderlich): _[Status]_
@@ -135,13 +141,17 @@ Verweis auf das TOM-Dokument bzw. Anhang. Die folgenden Maßnahmen sind bei Eins
 ## Beispiel-Eintrag: AInonymous für Code-Review-Unterstützung
 
 ### Bezeichnung
+
 LLM-gestützte Code-Analyse und Code-Review-Unterstützung via AInonymous-Proxy.
 
 ### Zweck
+
 Unterstützung der Softwareentwicklungsabteilung bei Code-Reviews, Refactoring-Vorschlägen und Fehleranalyse durch Nutzung eines kommerziellen LLM-Dienstes. Die Übermittlung an den Drittland-Anbieter erfolgt ausschließlich über den AInonymous-Proxy, der Quellcode-Identifier, Secrets und Identitätsdaten vor der Übermittlung pseudonymisiert bzw. redaktiert.
 
 ### Rechtsgrundlage
+
 Art. 6 Abs. 1 lit. f DSGVO - berechtigtes Interesse des Verantwortlichen an Produktivitätssteigerung, Code-Qualität und Fehlerprävention. Interessenabwägung dokumentiert; die berechtigten Interessen überwiegen die Interessen der betroffenen Personen, weil:
+
 - Namen, E-Mail-Adressen und Identifier werden durch AInonymous vor der Übermittlung pseudonymisiert.
 - Secrets werden redaktiert und nie übermittelt.
 - Keine besonderen Kategorien nach Art. 9 werden verarbeitet.
@@ -149,11 +159,13 @@ Art. 6 Abs. 1 lit. f DSGVO - berechtigtes Interesse des Verantwortlichen an Prod
 - Mitarbeiter wurden im Rahmen der Betriebsvereinbarung _[...]_ informiert; Widerspruchsrecht nach Art. 21 besteht.
 
 ### Kategorien Betroffener
+
 - Software-Entwicklerinnen und -Entwickler (intern)
 - Ggf. Autoren historischer Commits (bei Git-Blame-Analyse)
 - Kunden und Dritte, sofern deren Daten in Kommentaren oder Testdaten vorkommen (Restrisiko, Schulungen nach _[...]_ adressieren dies)
 
 ### Datenkategorien
+
 - Benutzernamen (git config user.name) - pseudonymisiert
 - E-Mail-Adressen (git config user.email) - pseudonymisiert
 - Quellcode-Identifier (Klassen, Variablen, Funktionsnamen, Dateinamen) - teilweise pseudonymisiert nach Policy
@@ -161,17 +173,21 @@ Art. 6 Abs. 1 lit. f DSGVO - berechtigtes Interesse des Verantwortlichen an Prod
 - Secrets (API-Keys, Tokens, Credentials) - vor Übermittlung redaktiert, nie rehydriert
 
 ### Empfänger
+
 - Anthropic PBC, San Francisco, CA, USA (Claude API)
 - Transfer-Grundlage: Standardvertragsklauseln der EU-Kommission 2021/914 (Modul 2, Controller-to-Processor), ergänzt durch Anonymisierung und Pseudonymisierung vor Übermittlung als zusätzliche Schutzmaßnahme im Sinne der EDSA-Empfehlungen 01/2020.
 - Auftragsverarbeitungsvertrag nach Art. 28 abgeschlossen am _[Datum]_, hinterlegt unter _[Verweis]_.
 
 ### Löschfristen
+
 - AInonymous Session-Map: bei Prozess-Ende (flüchtig im Arbeitsspeicher).
 - AInonymous Audit-Log: 90 Tage rolling, anschließend anonymisierte Archivierung.
 - Request-/Response-Logs beim LLM-Anbieter: gemäß Anthropic DPA und Retention-Policy, typischerweise 30 Tage für Abuse-Monitoring; keine Nutzung zum Modelltraining bei Enterprise-Tier.
 
 ### Technische und organisatorische Maßnahmen
+
 Siehe zentrales TOM-Dokument, ergänzt durch die AInonymous-Betriebsdokumentation (SECURITY.md, THREAT_MODEL.md). Kernpunkte:
+
 - 3-Layer-Pipeline mit deterministischer Pseudonymisierung
 - AES-256-GCM für persistierte Mappings
 - SHA-256-Hash-Chain im Audit-Log
@@ -185,22 +201,29 @@ Siehe zentrales TOM-Dokument, ergänzt durch die AInonymous-Betriebsdokumentatio
 Auftragsverarbeiter führen ein eigenes Verzeichnis mit folgenden Angaben:
 
 ### 1. Name und Kontaktdaten des Auftragsverarbeiters
+
 - Organisation, Anschrift, Vertreter, Datenschutzbeauftragter: analog Art. 30 Abs. 1 Nr. 1.
 
 ### 2. Name und Kontaktdaten jedes Verantwortlichen, in dessen Auftrag verarbeitet wird
+
 - Pro Auftraggeber ein Eintrag: _[...]_
 
 ### 3. Kategorien von Verarbeitungen im Auftrag
+
 - _[z.B. Bereitstellung der AInonymous-Instanz als Managed Service]_
 
 ### 4. Drittlandtransfers
+
 - Analog Art. 30 Abs. 1 Nr. 5 einschließlich Dokumentation geeigneter Garantien.
 
 ### 5. Allgemeine Beschreibung der TOMs
+
 - Verweis auf TOM-Dokument analog Art. 30 Abs. 1 Nr. 7.
 
 ### Unterauftragsverarbeiter
+
 Für jeden Unterauftragsverarbeiter (Sub-Processor):
+
 - Name und Kontaktdaten
 - Verarbeitungsumfang
 - Standort (EU/EWR oder Drittland mit Garantien)

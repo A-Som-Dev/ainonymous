@@ -289,12 +289,14 @@ Ort, Datum: `[Ort, Datum]`
 
 Für den Auftraggeber:
 
-_________________________
+---
+
 `[Name, Funktion]`
 
 Für den Auftragnehmer:
 
-_________________________
+---
+
 `[Name, Funktion]`
 
 ---
@@ -387,13 +389,13 @@ Die folgenden Maßnahmen sind nach Art. 32 DSGVO sowie in Anlehnung an die Schut
 
 Stand: `[Datum]`
 
-| Unter-Auftragsverarbeiter | Sitz | Ort der Verarbeitung | Zweck | Rechtsgrundlage Drittland |
-|--------------------------|------|----------------------|-------|---------------------------|
-| Anthropic PBC | San Francisco, USA | USA, ggf. EU-Regionen | LLM-API (Claude) | SCC 2021/914, Modul 2; ggf. Data Privacy Framework |
-| OpenAI, L.L.C. | San Francisco, USA | USA | LLM-API (GPT) | SCC 2021/914, Modul 2; ggf. Data Privacy Framework |
-| `[Hosting-Provider]` | `[Sitz]` | `[Ort]` | Infrastruktur / Hosting | `[SCC / Angemessenheitsbeschluss / n. zutr.]` |
-| `[Monitoring-Provider]` | `[Sitz]` | `[Ort]` | Betrieb / SIEM | `[SCC / Angemessenheitsbeschluss / n. zutr.]` |
-| `[Backup-Provider]` | `[Sitz]` | `[Ort]` | Datensicherung | `[SCC / Angemessenheitsbeschluss / n. zutr.]` |
+| Unter-Auftragsverarbeiter | Sitz               | Ort der Verarbeitung  | Zweck                   | Rechtsgrundlage Drittland                          |
+| ------------------------- | ------------------ | --------------------- | ----------------------- | -------------------------------------------------- |
+| Anthropic PBC             | San Francisco, USA | USA, ggf. EU-Regionen | LLM-API (Claude)        | SCC 2021/914, Modul 2; ggf. Data Privacy Framework |
+| OpenAI, L.L.C.            | San Francisco, USA | USA                   | LLM-API (GPT)           | SCC 2021/914, Modul 2; ggf. Data Privacy Framework |
+| `[Hosting-Provider]`      | `[Sitz]`           | `[Ort]`               | Infrastruktur / Hosting | `[SCC / Angemessenheitsbeschluss / n. zutr.]`      |
+| `[Monitoring-Provider]`   | `[Sitz]`           | `[Ort]`               | Betrieb / SIEM          | `[SCC / Angemessenheitsbeschluss / n. zutr.]`      |
+| `[Backup-Provider]`       | `[Sitz]`           | `[Ort]`               | Datensicherung          | `[SCC / Angemessenheitsbeschluss / n. zutr.]`      |
 
 ## Drittland-Transfer
 

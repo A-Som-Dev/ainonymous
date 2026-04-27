@@ -42,7 +42,11 @@ describe('auto-detect alias discovery (T6)', () => {
       JSON.stringify({ name: '@acme/service', version: '0.0.1' }),
       'utf-8',
     );
-    writeFileSync(join(dir, 'README.md'), `# jobs4sally internal tooling\n\nSome prose.\n`, 'utf-8');
+    writeFileSync(
+      join(dir, 'README.md'),
+      `# jobs4sally internal tooling\n\nSome prose.\n`,
+      'utf-8',
+    );
     const cfg = autoDetect(dir);
     const lowered = cfg.code.domainTerms.map((t) => t.toLowerCase());
     expect(lowered).toContain('jobs4sally');
@@ -57,17 +61,9 @@ describe('auto-detect alias discovery (T6)', () => {
   });
 
   it('deduplicates aliases across sources', () => {
-    writeFileSync(
-      join(dir, 'package.json'),
-      JSON.stringify({ name: 'foo-bar' }),
-      'utf-8',
-    );
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'foo-bar' }), 'utf-8');
     writeFileSync(join(dir, 'README.md'), `# foo-bar\n`, 'utf-8');
-    writeFileSync(
-      join(dir, 'pyproject.toml'),
-      `[project]\nname = "foo-bar"\n`,
-      'utf-8',
-    );
+    writeFileSync(join(dir, 'pyproject.toml'), `[project]\nname = "foo-bar"\n`, 'utf-8');
     const cfg = autoDetect(dir);
     const count = cfg.code.domainTerms.filter((t) => t === 'foo-bar').length;
     expect(count).toBe(1);

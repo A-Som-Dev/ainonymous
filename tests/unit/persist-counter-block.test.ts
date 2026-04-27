@@ -65,11 +65,9 @@ describe('PersistStore counter block reservation', () => {
     const store = new PersistStore(dbPath);
     // Raw upsert to prime the counter just below the safe limit
     const near = Number.MAX_SAFE_INTEGER - 5;
-    (store as unknown as { counterUpsertStmt: { run: (...a: unknown[]) => void } }).counterUpsertStmt.run(
-      'identifier',
-      near,
-      Date.now(),
-    );
+    (
+      store as unknown as { counterUpsertStmt: { run: (...a: unknown[]) => void } }
+    ).counterUpsertStmt.run('identifier', near, Date.now());
     expect(() => store.reserveCounterBlock('identifier', 100)).toThrow(/overflow/);
     store.close();
   });

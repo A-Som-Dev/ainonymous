@@ -1,60 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AInonymous Dashboard</title>
-  <link rel="stylesheet" href="/dashboard/app.css">
-  <script src="/dashboard/app.js" defer></script>
-</head>
-<body>
-  <header>
-    <h1>AInonymous Dashboard</h1>
-    <div class="status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Live</span>
-    </div>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AInonymous Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/app.css" />
+    <script src="/dashboard/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AInonymous Dashboard</h1>
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Live</span>
+      </div>
+    </header>
 
-  <section class="cards">
-    <div class="card card-secrets">
-      <div class="card-label">Secrets</div>
-      <div class="card-value" id="statSecrets">0</div>
-    </div>
-    <div class="card card-identity">
-      <div class="card-label">Identity</div>
-      <div class="card-value" id="statIdentity">0</div>
-    </div>
-    <div class="card card-code">
-      <div class="card-label">Code</div>
-      <div class="card-value" id="statCode">0</div>
-    </div>
-    <div class="card card-total">
-      <div class="card-label">Total</div>
-      <div class="card-value" id="statTotal">0</div>
-    </div>
-  </section>
+    <section class="cards">
+      <div class="card card-secrets">
+        <div class="card-label">Secrets</div>
+        <div class="card-value" id="statSecrets">0</div>
+      </div>
+      <div class="card card-identity">
+        <div class="card-label">Identity</div>
+        <div class="card-value" id="statIdentity">0</div>
+      </div>
+      <div class="card card-code">
+        <div class="card-label">Code</div>
+        <div class="card-value" id="statCode">0</div>
+      </div>
+      <div class="card card-total">
+        <div class="card-label">Total</div>
+        <div class="card-value" id="statTotal">0</div>
+      </div>
+    </section>
 
-  <section class="table-wrapper">
-    <div class="table-header">
-      <h2>Event Log</h2>
-      <span id="entryCount">0 entries</span>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Layer</th>
-          <th>Type</th>
-          <th>Pseudonym</th>
-        </tr>
-      </thead>
-      <tbody id="eventBody">
-        <tr class="empty-state-row">
-          <td colspan="4" class="empty-state">Waiting for events...</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-</body>
+    <section class="table-wrapper">
+      <div class="table-header">
+        <h2>Event Log</h2>
+        <span id="entryCount">0 entries</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Layer</th>
+            <th>Type</th>
+            <th>Pseudonym</th>
+          </tr>
+        </thead>
+        <tbody id="eventBody">
+          <tr class="empty-state-row">
+            <td colspan="4" class="empty-state">Waiting for events...</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </body>
 </html>

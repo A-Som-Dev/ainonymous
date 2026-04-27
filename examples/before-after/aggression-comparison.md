@@ -6,14 +6,14 @@ Same Java input, three different `behavior.aggression` settings. This is the sin
 
 ```yaml
 identity:
-  company: "Acme Corp"
-  domains: ["acme-corp.com", "acme-corp.local"]
-  people: ["Artur Sommer"]
+  company: 'Acme Corp'
+  domains: ['acme-corp.com', 'acme-corp.local']
+  people: ['Artur Sommer']
 
 code:
   language: java
-  domain_terms: ["Customer", "Invoice", "Billing"]
-  preserve: ["Spring", "Service", "Autowired", "Repository"]
+  domain_terms: ['Customer', 'Invoice', 'Billing']
+  preserve: ['Spring', 'Service', 'Autowired', 'Repository']
 ```
 
 The only thing that changes between runs is `behavior.aggression`.
@@ -130,10 +130,10 @@ public class AlphaBetaService {
 
 ## Rule of thumb
 
-| Repo type | Recommended mode |
-|-----------|------------------|
-| Internal CRUD, web apps, typical SaaS backend | `medium` |
-| Open-source libraries, public docs, tutorials | `low` |
+| Repo type                                         | Recommended mode                         |
+| ------------------------------------------------- | ---------------------------------------- |
+| Internal CRUD, web apps, typical SaaS backend     | `medium`                                 |
+| Open-source libraries, public docs, tutorials     | `low`                                    |
 | Payment, auth, cryptography, compliance-sensitive | `high` (or `medium` + `sensitive_paths`) |
 
 Measure before switching. `ainonymous scan` shows exactly which identifiers each mode would rewrite in your repo without running a real session.

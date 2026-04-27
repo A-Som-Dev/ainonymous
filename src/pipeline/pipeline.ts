@@ -58,10 +58,13 @@ export class Pipeline {
     if (persist) this.seedCountersFromStore();
     this.identity = new IdentityLayer(this.pseudoGen);
     this.code = new CodeLayer(this.pseudoGen);
-    this.orFilters = selectFilters({
-      disable: config.filters?.disable,
-      extra: [],
-    }, BUILT_IN_OR_FILTERS);
+    this.orFilters = selectFilters(
+      {
+        disable: config.filters?.disable,
+        extra: [],
+      },
+      BUILT_IN_OR_FILTERS,
+    );
     this.disabledDetectorIds = new Set(config.detectors?.disable ?? []);
   }
 

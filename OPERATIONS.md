@@ -29,12 +29,12 @@ ainonymous stop
 
 ## Health & Metrics
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /health` | Liveness probe. Returns JSON `{ status: "ok", ... }`. |
-| `GET /metrics` | Prometheus text format. Counters for requests, audit entries; gauges for uptime and session map size. |
-| `GET /metrics/json` | Same data, JSON. For legacy scrapers. |
-| `GET /dashboard` | Live audit stream UI (localhost only by default). |
+| Endpoint            | Purpose                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GET /health`       | Liveness probe. Returns JSON `{ status: "ok", ... }`.                                                 |
+| `GET /metrics`      | Prometheus text format. Counters for requests, audit entries; gauges for uptime and session map size. |
+| `GET /metrics/json` | Same data, JSON. For legacy scrapers.                                                                 |
+| `GET /dashboard`    | Live audit stream UI (localhost only by default).                                                     |
 
 Example Prometheus scrape config:
 
@@ -56,7 +56,13 @@ scrape_configs:
 All operational logs are structured JSON on stdout/stderr:
 
 ```json
-{"level":"error","ts":"2026-04-16T09:40:42.774Z","msg":"upstream request failed","upstream":"https://api.anthropic.com","err":"ECONNREFUSED"}
+{
+  "level": "error",
+  "ts": "2026-04-16T09:40:42.774Z",
+  "msg": "upstream request failed",
+  "upstream": "https://api.anthropic.com",
+  "err": "ECONNREFUSED"
+}
 ```
 
 Ship to your SIEM via Filebeat, Fluent Bit, or `journalctl -o json` for systemd deployments.

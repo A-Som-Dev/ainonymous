@@ -38,11 +38,8 @@ export class SecretsLayer implements Layer {
     if (!reg) return [];
     const aggression = ctx.config.behavior.aggression ?? 'medium';
     const preset = (ctx.config.behavior.compliance ?? '').toLowerCase();
-    const out = await reg.detectByCapability(
-      ['secrets'],
-      text,
-      { aggression, preset },
-      (id, err) => log.warn('detector plugin threw', { id, err: String(err) }),
+    const out = await reg.detectByCapability(['secrets'], text, { aggression, preset }, (id, err) =>
+      log.warn('detector plugin threw', { id, err: String(err) }),
     );
     return out.map((h) => ({
       type: h.type,

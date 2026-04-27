@@ -2,7 +2,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import type { AuditEntry } from '../types.js';
-import { findLogFiles, verifyFile, type VerifyResult, isHmacFailure } from '../audit/verify-scan.js';
+import {
+  findLogFiles,
+  verifyFile,
+  type VerifyResult,
+  isHmacFailure,
+} from '../audit/verify-scan.js';
 
 function readJsonlFile(path: string): AuditEntry[] {
   const content = readFileSync(path, 'utf-8');
