@@ -1,10 +1,10 @@
-import Parser from 'web-tree-sitter';
+import { Parser, Language } from 'web-tree-sitter';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
 let parserReady = false;
-const languageCache = new Map<string, Parser.Language>();
+const languageCache = new Map<string, Language>();
 const parserCache = new Map<string, Promise<Parser>>();
 
 const WASM_NAMES: Record<string, string> = { csharp: 'c_sharp' };
@@ -48,12 +48,12 @@ export async function getParser(lang: string): Promise<Parser> {
   }
 }
 
-export async function getLanguage(lang: string): Promise<Parser.Language> {
+export async function getLanguage(lang: string): Promise<Language> {
   const cached = languageCache.get(lang);
   if (cached) return cached;
 
   const wasmPath = resolveWasmPath(lang);
-  const language = await Parser.Language.load(wasmPath);
+  const language = await Language.load(wasmPath);
   languageCache.set(lang, language);
   return language;
 }

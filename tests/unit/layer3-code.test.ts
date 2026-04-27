@@ -107,11 +107,11 @@ describe('CodeLayer', () => {
   });
 
   it('anonymizes Java package paths with company domain', async () => {
-    ctx.config.identity = { company: 'enbw', domains: ['enbw.de'], people: [] };
+    ctx.config.identity = { company: 'acme', domains: ['acme.de'], people: [] };
     ctx.config.code.domainTerms = ['Partner'];
-    const code = 'package de.enbw.customerdb;\nimport de.enbw.customerdb.model.Customer;';
+    const code = 'package de.acme.customerdb;\nimport de.acme.customerdb.model.Customer;';
     const result = await layer.processAsync(code, ctx);
-    expect(result.text).not.toContain('enbw');
+    expect(result.text).not.toContain('acme');
     expect(result.text).not.toContain('customerdb');
     // TLD should be preserved
     expect(result.text).toMatch(/package de\./);

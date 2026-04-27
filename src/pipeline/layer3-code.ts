@@ -227,6 +227,12 @@ export class CodeLayer implements Layer {
     const lang = ctx.config.code.language;
     let result = text;
 
+    // Infrastructure-only repos detect as 'unknown'; tree-sitter has no
+    // grammar for that, the load would throw and the catch below would
+    // swallow it. Skip the whole AST step instead so we don't pay the
+    // wasm-init cost on every request for those repos.
+    if (lang === 'unknown') return result;
+
     try {
       // Only run tree-sitter on fenced code. Raw prose runs through AST as
       // valid-looking identifiers and rehydrate then substring-collides.
