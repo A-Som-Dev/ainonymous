@@ -128,6 +128,28 @@ function migrate(input: Record<string, unknown>, opts: MigrateOptions): Record<s
   const session = shallowObject(input.session);
   if (session) out.session = session;
 
+  const streaming = shallowObject(behavior.streaming);
+  if (streaming && typeof streaming.eager_flush === 'boolean') {
+    (out.behavior as Record<string, unknown>).streaming = {
+      eager_flush: streaming.eager_flush,
+    };
+  }
+
+  const filters = shallowObject(input.filters);
+  if (filters) {
+    out.filters = {
+      disable: Array.isArray(filters.disable) ? filters.disable : [],
+      custom: Array.isArray(filters.custom) ? filters.custom : [],
+    };
+  }
+
+  const trust = shallowObject(input.trust);
+  if (trust) {
+    out.trust = {
+      allow_unsigned_local: trust.allow_unsigned_local === true,
+    };
+  }
+
   return out;
 }
 

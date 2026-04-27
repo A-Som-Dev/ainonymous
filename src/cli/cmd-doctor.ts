@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import type { Command } from 'commander';
 import { validateRawConfig, hasErrors } from '../config/validate.js';
+import { parseCheckpoint } from '../audit/logger.js';
 import yaml from 'js-yaml';
 
 interface Check {
@@ -17,26 +18,39 @@ export function registerDoctorCmd(program: Command): void {
     .description('Validate environment, config and port availability before first start')
     .option('-d, --dir <path>', 'project directory', process.cwd())
     .option('--strict', 'exit non-zero on warnings too (for CI gates)')
-    .action(async (opts: { dir: string; strict?: boolean }) => {
+    .option('--force', 'ignore identity-coverage warnings and exit 0')
+    .action(async (opts: { dir: string; strict?: boolean; force?: boolean }) => {
       const host = process.env['AINONYMOUS_HOST'] ?? '127.0.0.1';
       const checks: Check[] = [];
       checks.push(checkNodeVersion());
       checks.push(checkConfigFile(opts.dir));
       checks.push(...checkConfigIdentity(opts.dir));
+      checks.push(checkSkipDirs(opts.dir));
+      checks.push(checkLanguageOverride(opts.dir));
+      checks.push(checkAuditCheckpoint(opts.dir));
       checks.push(await checkPort(resolvePort(opts.dir), host));
       checks.push(checkEnvUpstream());
 
       const width = Math.max(...checks.map((c) => c.label.length));
       let failed = 0;
       let warned = 0;
+      let piiWarned = 0;
       for (const c of checks) {
         const icon = c.status === 'ok' ? '✔' : c.status === 'warn' ? '!' : '✘';
         console.log(`  ${icon}  ${c.label.padEnd(width)}  ${c.detail ?? ''}`);
         if (c.status === 'fail') failed++;
-        if (c.status === 'warn') warned++;
+        if (c.status === 'warn') {
+          warned++;
+          if (c.label.startsWith('identity.')) piiWarned++;
+        }
       }
-      if (failed > 0 || (opts.strict && warned > 0)) {
-        const reason = failed > 0 ? `${failed} failed` : `${warned} warning(s) under --strict`;
+      const piiGate = piiWarned > 0 && !opts.force;
+      if (failed > 0 || piiGate || (opts.strict && warned > 0)) {
+        let reason: string;
+        if (failed > 0) reason = `${failed} failed`;
+        else if (piiGate)
+          reason = `${piiWarned} identity coverage warning(s). PII will likely leak. rerun with --force to proceed anyway`;
+        else reason = `${warned} warning(s) under --strict`;
         console.log(`\n${reason}. Fix the entries above before running start.`);
         process.exit(1);
       } else {
@@ -157,6 +171,115 @@ function checkPort(port: number, host: string): Promise<Check> {
     });
     srv.listen(port, host);
   });
+}
+
+export function checkSkipDirs(dir: string): Check {
+  const bare = join(dir, 'venv');
+  if (existsSync(bare)) {
+    return {
+      label: 'skip dirs',
+      status: 'warn',
+      detail: '`venv/` present without dot prefix. Rename to `.venv/`.',
+    };
+  }
+  return { label: 'skip dirs', status: 'ok' };
+}
+
+export function checkLanguageOverride(dir: string): Check {
+  const cfgPath = join(dir, '.ainonymous.yml');
+  if (!existsSync(cfgPath)) return { label: 'code.language', status: 'ok', detail: 'no config' };
+  let raw: Record<string, unknown>;
+  try {
+    raw = yaml.load(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return { label: 'code.language', status: 'ok', detail: 'config unreadable' };
+  }
+  const code = (raw.code ?? {}) as Record<string, unknown>;
+  if (code.language !== 'unknown') {
+    return { label: 'code.language', status: 'ok' };
+  }
+  const codeMarkers = [
+    'pom.xml',
+    'package.json',
+    'go.mod',
+    'Cargo.toml',
+    'requirements.txt',
+    'pyproject.toml',
+    'setup.py',
+    'build.gradle',
+    'build.gradle.kts',
+  ];
+  for (const marker of codeMarkers) {
+    if (existsSync(join(dir, marker))) {
+      return {
+        label: 'code.language',
+        status: 'warn',
+        detail: `set to 'unknown' but ${marker} suggests source code is present. Layer-3 identifier anonymisation will be skipped.`,
+      };
+    }
+  }
+  return { label: 'code.language', status: 'ok', detail: 'unknown (no source markers found)' };
+}
+
+export function checkAuditCheckpoint(dir: string): Check {
+  const cfgPath = join(dir, '.ainonymous.yml');
+  if (!existsSync(cfgPath)) return { label: 'audit checkpoint', status: 'ok', detail: 'no config' };
+  let raw: Record<string, unknown>;
+  try {
+    raw = yaml.load(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return { label: 'audit checkpoint', status: 'ok', detail: 'config unreadable' };
+  }
+  const audit = (raw.audit ?? {}) as Record<string, unknown>;
+  const persistDir = typeof audit.persist_dir === 'string' ? audit.persist_dir : undefined;
+  if (!persistDir) {
+    return { label: 'audit checkpoint', status: 'ok', detail: 'persistence not configured' };
+  }
+  const absDir =
+    persistDir.startsWith('/') || /^[A-Za-z]:/.test(persistDir)
+      ? persistDir
+      : join(dir, persistDir);
+  if (!existsSync(absDir)) {
+    return { label: 'audit checkpoint', status: 'ok', detail: 'audit dir not yet created' };
+  }
+  let driftFile: string | null = null;
+  try {
+    const entries = readdirSync(absDir).filter((f) => f.endsWith('.jsonl'));
+    for (const f of entries) {
+      const jsonlPath = join(absDir, f);
+      const ckptPath = jsonlPath + '.checkpoint';
+      if (!existsSync(ckptPath)) continue;
+      const tailSeq = lastJsonlSeq(jsonlPath);
+      if (tailSeq === null) continue;
+      const ckpt = parseCheckpoint(readFileSync(ckptPath, 'utf-8'));
+      if (ckpt === null) continue;
+      if (ckpt.lastSeq < tailSeq) {
+        driftFile = f;
+        break;
+      }
+    }
+  } catch {
+    /* audit verify --strict is the authoritative check */
+  }
+  if (driftFile) {
+    return {
+      label: 'audit checkpoint',
+      status: 'warn',
+      detail: `${driftFile}: checkpoint behind jsonl tail. Run \`ainonymous audit verify --strict\``,
+    };
+  }
+  return { label: 'audit checkpoint', status: 'ok', detail: absDir };
+}
+
+function lastJsonlSeq(path: string): number | null {
+  try {
+    const lines = readFileSync(path, 'utf-8').split('\n').filter((l) => l.trim());
+    if (lines.length === 0) return null;
+    const last = JSON.parse(lines[lines.length - 1]) as { seq?: unknown };
+    return typeof last.seq === 'number' && Number.isInteger(last.seq) ? last.seq : null;
+  } catch {
+    return null;
+  }
 }
 
 function checkEnvUpstream(): Check {

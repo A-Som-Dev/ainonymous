@@ -71,6 +71,27 @@ describe('doctor', () => {
     expect(status).toBe(1);
   });
 
+  it('exits 1 on identity-coverage warnings without --force', () => {
+    writeFileSync(
+      join(workdir, '.ainonymous.yml'),
+      'identity:\n  company: ""\n  domains: []\n  people: []\n',
+      'utf-8',
+    );
+    const { status, stdout } = runDoctor(workdir);
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/--force/);
+  });
+
+  it('passes identity-coverage warnings with --force', () => {
+    writeFileSync(
+      join(workdir, '.ainonymous.yml'),
+      'identity:\n  company: ""\n  domains: []\n  people: []\n',
+      'utf-8',
+    );
+    const { status } = runDoctor(workdir, ['--force']);
+    expect(status).toBe(0);
+  });
+
   it('passes with populated identity', () => {
     writeFileSync(
       join(workdir, '.ainonymous.yml'),
