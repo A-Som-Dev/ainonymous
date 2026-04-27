@@ -2,6 +2,229 @@
 
 All notable changes to AInonymous are documented here. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is [SemVer](https://semver.org/).
 
+## [1.3.0] - 2026-04-23
+
+Detection-side Unicode hardening plus the filter-framework and offline-preview
+tooling. The SemVer chain stays additive and non-breaking; existing configs
+keep running without edits.
+
+### Fixed
+
+- Audit checkpoint and watermark sidecars are written via a shared
+  write-then-rename helper. A crash mid-write can no longer leave a torn
+  JSON body that a subsequent restart would silently treat as absent or
+  corrupt.
+- NER hit name slices come from the NFKC + zero-width-stripped form so the
+  SessionMap key is identical for `Thomas​Mueller` and a clean
+  `Thomas Mueller` repeat. Without this a second request would allocate a
+  fresh pseudonym instead of reusing the first.
+- Layer 3 skips the tree-sitter AST pass when `code.language` is `unknown`,
+  so infra-only repos (Helm, Terraform, Ansible) stop paying the WASM-init
+  cost on every request.
+- `cmd /c start` URL is validated for scheme, loopback host and shell
+  metacharacters before launch, including caret (`^`), parentheses and
+  CR/LF. The mgmt token in the dashboard URL is `encodeURIComponent`-wrapped.
+- Detector-loader and OrPostFilter-loader share one pinned-module helper
+  with full HEX64 pin validation. The detector path was missing the
+  format check before this release.
+- FREE_PROVIDERS picks up `aol.de`, `zoho.com` and `fastmail.com` so a
+  global git `user.email` on any of those domains stops surfacing as a
+  detected company.
+- `BiMap.set` rejects originals that are themselves a sentinel literal
+  (`***REDACTED***`, `***ANONYMIZED***`). Previously an upstream payload
+  echoing a sentinel could poison the map. Sentinels remain accepted as
+  pseudonyms (fan-out tracked separately via `sentinelFanoutCount`).
+- `PseudoGen` for `identifier` and `person` retries when the generated
+  greek-letter pseudo happens to equal the original. Skip count exposed
+  via `identityMapSkips()` for debug/audit.
+- Rehydrate runs a second pass for IPv6 pseudonyms that matches in
+  canonical form (fully expanded, lowercase). A response that rewrites
+  the pseudo with leading-zero padding or uppercase hex now resolves
+  back to the original.
+- `normalizeForDetection` now runs full-string NFKC per Unicode grapheme
+  cluster before the category strip. Cross-codepoint compositions (Hangul
+  L+V jamo to precomposed syllable, CJK compatibility sequences, combining
+  mark normalisation) that the previous per-codepoint call skipped now
+  reach the substring matcher in the expected form.
+- Latin, Cyrillic and Greek confusable letters fold to their ASCII baseline
+  on the detection side only. Long S (U+017F), dotless i (U+0131), Turkish
+  capital I with dot (U+0130), the Cyrillic lowercase set (а е о р с х у i
+  j s) and equivalent uppercase glyphs no longer bypass glossary or secret
+  key-name matching. Rehydrated output keeps the original codepoints, so
+  legitimate non-Latin content in LLM responses is unaffected.
+- Rehydration strips category-Cf characters, variation selectors and the
+  width-zero filler set from upstream responses before running the
+  pseudonym-to-original substitution. A pseudonym split by ZWJ, ZWNJ, or
+  Combining Grapheme Joiner still lines up with the session map.
+
+### Added
+
+- Watermark schema v=2 records the OS boot identifier on Linux
+  (`/proc/sys/kernel/random/boot_id`) and folds it into the HMAC body, so a
+  watermark copied across kernel boot sessions on the same machine breaks
+  signature verification under HMAC mode. Same-host containers share the
+  host kernel boot_id, so the witness is cross-boot defense, not
+  cross-pod. macOS and Windows return null until a real native source is
+  wired in. Legacy v=1 watermarks remain readable and migrate to v=2 on
+  the next persistEntry.
+- `ainonymous doctor` gains three checks: a stale `venv/` warning, a
+  language-override sanity check that warns when `code.language: unknown`
+  but a `package.json` / `pom.xml` / `go.mod` is in the repo, and a real
+  checkpoint-vs-jsonl-tail drift scan that surfaces a stale or rolled-back
+  checkpoint as a warning.
+- `behavior.oauth_passthrough` (default `false`) forwards paths outside
+  `/v1/messages` and `/v1/chat/completions` directly to the configured
+  upstream without body anonymization. Enables OAuth subscription clients
+  (Claude Code Max-Plan, Cursor Pro) that use refresh / organization
+  endpoints alongside the chat route. The `Authorization` header has
+  always been passed through; this flag widens which paths the proxy
+  will accept at all.
+- Optional HMAC tamper-evidence for audit logs. When
+  `AINONYMOUS_AUDIT_HMAC_KEY` is set (base64-encoded 32-byte key), each
+  persisted entry is accompanied by a `.hmac` sidecar entry containing
+  the HMAC-SHA256 of the serialized line. `audit verify` cross-checks
+  the sidecar and returns `tamper` when an entry was modified or the
+  sidecar is missing while the key is configured. Key management
+  (generation, rotation, backup, rotation on leak) is the operator's
+  responsibility; the proxy does not auto-generate or persist the key.
+  Without the key, audit integrity falls back to the v1.2.x hash-chain
+  consistency check.
+- `audit verify` validates the `.checkpoint` sidecar against a strict
+  schema (integer `lastSeq >= 0`, 64-char lowercase-hex `lastHash`)
+  before comparing it to the chain. A truncated, empty, or structurally
+  malformed checkpoint now fails fast with a tamper result instead of
+  cascading through the chain verifier.
+- README `Limitations` section documents that OAuth-authenticated
+  subscriptions (Claude Code Max-Plan, Cursor Pro) do not route through
+  the proxy by design, and points at the separate-API-key workaround.
+- README `Install` section gains a Windows setup subsection covering
+  `%USERPROFILE%\.ainonymous\`, `nssm` for service wrapping, and the
+  PowerShell environment-variable syntax.
+- HMAC keyring for audit sidecars. Export one key per kid through
+  `AINONYMOUS_AUDIT_HMAC_KEY_<KID>` env vars and point
+  `AINONYMOUS_AUDIT_HMAC_ACTIVE_KID` at the signer. Older kids stay
+  verifiable as long as their env var is exported, so rotation no
+  longer forces an archival flush. The legacy single-key
+  `AINONYMOUS_AUDIT_HMAC_KEY` continues to work as kid `default`.
+- `/metrics` surfaces `ainonymous_identity_map_skips_total`
+  (PseudoGen identity-collision retries), `ainonymous_sentinel_fanout`
+  per sentinel pseudonym, and `ainonymous_audit_hmac_verify_failures_total`
+  (files with broken HMAC sidecar). `audit pending` grows a
+  `tamper-impacted` bucket for entries in files whose sidecar failed
+  verify.
+- StreamRehydrator also rewrites pseudonyms inside Anthropic
+  `thinking_delta` content blocks. `input_json_delta` fragments are
+  forwarded unchanged so tool-call JSON stays parseable even if an
+  original contains embedded quotes or backslashes.
+- Persisted counter reservations are guarded against
+  `Number.MAX_SAFE_INTEGER` overflow; the HMAC keyring rejects
+  collisions between the legacy env var and an
+  `AINONYMOUS_AUDIT_HMAC_KEY_DEFAULT` alias, and kids must now start
+  with `[a-z0-9]` and stay under 64 characters.
+- SessionMap persistence reserves a per-process counter block
+  (`counters` meta table) so sibling proxies sharing one SQLite file
+  no longer generate colliding identifier/person pseudonyms.
+- CycloneDX SBOM is now bundled inside the npm tarball
+  (`sbom.cdx.json` in the package files) in addition to being
+  published as a GitHub release asset. The generator version is
+  pinned to `@cyclonedx/cyclonedx-npm@4.2.1` across CI, release and
+  Makefile targets.
+- `filters:` config section. `filters.disable` removes built-in OrPostFilters
+  (`always-disabled`, `country-ids`, `credit-card-preset`) from the effective
+  chain. `filters.custom` loads project-local `.mjs` filter modules behind a
+  trust gate.
+- `trust.allow_unsigned_local` config flag. Required for `filters.custom`
+  to actually load. Refusing to run unsigned local code by default keeps
+  the trust-model explicit.
+- `ainonymous filters list` prints the active OrPostFilter chain with
+  descriptions; lists disabled filters separately.
+- `ainonymous filters validate <path>` performs the full shape check of a
+  custom filter without registering it.
+- `ainonymous preview --input-file <path>` runs the anonymization pipeline
+  offline against a file or stdin and emits either human-readable text plus a
+  finding summary or `--json` for CI pipelines.
+- `behavior.streaming.eager_flush` opt-in. Releases buffered response text at
+  sentence/newline boundaries instead of holding the full sliding window.
+  Trade-off (false-negative risk when a pseudonym straddles a boundary)
+  is documented in the stream-rehydrator source.
+- `auto-detect` derives aliases from `pyproject.toml`, `setup.py`,
+  `README.md` H1 lines and `git remote get-url origin` in addition to the
+  existing `package.json` and `pom.xml` sources.
+- `ainonymous/plugin-api` subpath export exposes the `DetectorPlugin` type
+  contract plus an `assertDetectorPlugin` runtime shape check.
+- NER stages pipeline (`src/patterns/ner/stages/`) with tokenize,
+  scriptClassify, prefixTrigger, dictionaryMatch, camelCaseSplit,
+  nonLatinRun and aggregate as discrete, independently-testable stages.
+  `detectNames` stays the stable public API and routes through the stages
+  internally. Parity-tested against the existing NER fixtures.
+- Layer 1 (secrets) and Layer 2 (identity) run through a
+  `DetectorPlugin`-shaped internal interface. The `detectors:` config
+  section is additive and lets operators disable individual built-in
+  detectors (OrPostFilter-style). External plugin loading stays internal
+  in 1.3; no separate npm package yet.
+- StreamRehydrator goes through a `StreamFormat` interface (anthropic,
+  openai). The format registry is internal for 1.3 but closes the
+  hardcoded branch in the rehydrator so a Gemini/Cohere adapter is
+  drop-in.
+- `filters.custom_pins` and `detectors.custom_pins` pin custom modules to
+  a SHA-256 digest. Pinned modules are rejected on content mismatch even
+  when `trust.allow_unsigned_local: true`. The loaders now read the file
+  once into memory, hash the buffer and feed the same bytes to `import()`
+  via a data URL so a TOCTOU swap between hash-check and import cannot
+  slip in an unpinned payload.
+- `.checkpoint` sidecars are signed with the active HMAC kid when one is
+  configured (`.checkpoint.hmac`). `seedFromCheckpoint` verifies the
+  signature on startup before replaying seq/lastHash, so an attacker with
+  one-shot write access to the audit dir cannot forge a chain anchor.
+- Plugin-emitted detections are namespaced as `plugin:<id>:<type>` before
+  the Layer 1/2 audit trail sees them, keeping built-in detector-id
+  collisions and type-field spoofing out of the dashboard.
+- `detectors.disable` matches both built-in type names and plugin ids, so
+  `disable: [my-plugin]` silences every hit a given plugin emitted.
+- `refreshHmacKeyring` logs a warning when a rotation resolves to an empty
+  keyring, so an accidental export-leak does not silently disable HMAC
+  signing.
+
+### Changed
+
+- `ainonymous doctor` now exits non-zero when `identity.company`,
+  `identity.domains` or `identity.people` are empty. The new `--force`
+  flag keeps the old permissive behaviour for setups that intentionally
+  leave one field blank. Non-PII warnings still require `--strict` to
+  fail the exit code. **CI migration note**: pipelines that ran
+  `ainonymous doctor` as a pre-flight check against a deliberately
+  minimal config (no company, no people list) will now fail. Add
+  `--force` or populate the identity fields.
+- `BENCHMARKS.md` gains a per-repo methodology table for the
+  "medium cuts findings by ~95 %" number. The README claim now links to
+  that section and the reproduction command.
+- `web-tree-sitter` bumped from 0.20.8 to 0.25.10. Internal only;
+  AST extraction surface and supported language list are unchanged.
+- `ainonymous config migrate` preserves `filters`, `trust`, `detectors`
+  and `behavior.streaming` sections through the rewrite.
+- `Pipeline` resolves the OrPostFilter chain once on construction from
+  built-ins + `filters.disable` + any trusted custom modules. The chain
+  is exposed as a readonly array on `PipelineContext.orFilters`.
+- The audit logger writes a JSON-encoded checkpoint alongside each
+  JSONL file. On startup the chain logger seeds `seq` and `lastHash`
+  from the checkpoint so the hash chain stays continuous across proxy
+  restarts.
+- The HMAC logger observes `SIGHUP` (POSIX) and re-reads
+  `AINONYMOUS_AUDIT_HMAC_KEY*` env vars, so operators can rotate the
+  active kid without a full restart.
+- `StreamRehydrator.flush()` runs a final rehydrate pass over the
+  leftover buffer before emitting it raw. Truncated SSE streams where a
+  pseudonym landed in the last chunk now round-trip through the session
+  map instead of leaking the pseudonym.
+- `lastEagerBoundary` tracks boundaries incrementally over the growing
+  buffer instead of re-scanning the full window on every push.
+- `loadConfiguredCustomFilters` imports modules in parallel via
+  `Promise.all`, so a `filters.custom: [a, b, c]` config no longer pays
+  three sequential `import()` hits on cold start.
+- `prepack` regenerates `sbom.cdx.json` via the pinned cyclonedx-npm
+  version and refuses to publish when the SBOM is older than the most
+  recent commit that touched `package.json` or `package-lock.json`.
+
 ## [1.2.2] - 2026-04-21
 
 Hardening release covering Unicode bypass gaps, PII coverage under strict compliance presets, and release-pipeline safeguards against orphan Sigstore attestations.
