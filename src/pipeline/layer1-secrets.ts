@@ -12,13 +12,44 @@ export class SecretsLayer implements Layer {
   process(text: string, ctx: PipelineContext): AnonymizeResult {
     const hits = matchSecrets(text);
     this.addCustomPatterns(hits, text, ctx);
-    return this.applyRedactions(text, hits);
+    return this.applyRedactions(text, this.filterDisabled(hits, ctx));
   }
 
   async processAsync(text: string, ctx: PipelineContext): Promise<AnonymizeResult> {
-    const hits = await matchSecretsEnhanced(text);
+    const hits = await matchSecretsEnhanced(text, { filters: ctx.orFilters });
     this.addCustomPatterns(hits, text, ctx);
-    return this.applyRedactions(text, hits);
+    const pluginHits = await this.runDetectorPlugins(text, ctx);
+    if (pluginHits.length > 0) hits.push(...pluginHits);
+    return this.applyRedactions(text, this.filterDisabled(hits, ctx));
+  }
+
+  private filterDisabled(hits: PatternMatch[], ctx: PipelineContext): PatternMatch[] {
+    const dis = ctx.disabledDetectorIds;
+    if (!dis || dis.size === 0) return hits;
+    return hits.filter((h) => {
+      if (dis.has(h.type)) return false;
+      const m = /^plugin:([^:]+):/.exec(h.type);
+      return !(m && dis.has(m[1]));
+    });
+  }
+
+  private async runDetectorPlugins(text: string, ctx: PipelineContext): Promise<PatternMatch[]> {
+    const reg = ctx.detectorRegistry;
+    if (!reg) return [];
+    const aggression = ctx.config.behavior.aggression ?? 'medium';
+    const preset = (ctx.config.behavior.compliance ?? '').toLowerCase();
+    const out = await reg.detectByCapability(
+      ['secrets'],
+      text,
+      { aggression, preset },
+      (id, err) => log.warn('detector plugin threw', { id, err: String(err) }),
+    );
+    return out.map((h) => ({
+      type: h.type,
+      match: h.match,
+      offset: h.offset,
+      length: h.length,
+    }));
   }
 
   private addCustomPatterns(hits: PatternMatch[], text: string, ctx: PipelineContext): void {

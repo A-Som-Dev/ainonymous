@@ -5,6 +5,7 @@ import { detectNames } from '../patterns/ner.js';
 import type { PatternMatch } from '../patterns/utils.js';
 import { normalizeForDetection, mapMatchToOriginal } from '../patterns/normalize.js';
 import { removeOverlaps } from './utils.js';
+import { log } from '../logger.js';
 import type { Layer, PipelineContext, AnonymizeResult, Replacement } from '../types.js';
 
 export class IdentityLayer implements Layer {
@@ -32,17 +33,48 @@ export class IdentityLayer implements Layer {
   async processAsync(text: string, ctx: PipelineContext): Promise<AnonymizeResult> {
     const configResult = this.applyConfigReplacements(text, ctx);
     const preset = ctx.config.behavior.compliance;
-    const [piiHits, infraHits] = await Promise.all([
-      matchPIIEnhanced(configResult.text, preset),
-      matchInfraEnhanced(configResult.text),
+    const [piiHits, infraHits, pluginHits] = await Promise.all([
+      matchPIIEnhanced(configResult.text, preset, { filters: ctx.orFilters }),
+      matchInfraEnhanced(configResult.text, { filters: ctx.orFilters }),
+      this.runDetectorPlugins(configResult.text, ctx),
     ]);
+    const combined = this.filterDisabled([...piiHits, ...infraHits, ...pluginHits], ctx);
     const patternResult = this.applyPatternHits(
       configResult.text,
-      [...piiHits, ...infraHits],
+      combined,
       configResult.replacements,
       ctx,
     );
     return this.applyNerHits(patternResult.text, patternResult.replacements, ctx);
+  }
+
+  private filterDisabled(hits: PatternMatch[], ctx: PipelineContext): PatternMatch[] {
+    const dis = ctx.disabledDetectorIds;
+    if (!dis || dis.size === 0) return hits;
+    return hits.filter((h) => {
+      if (dis.has(h.type)) return false;
+      const m = /^plugin:([^:]+):/.exec(h.type);
+      return !(m && dis.has(m[1]));
+    });
+  }
+
+  private async runDetectorPlugins(text: string, ctx: PipelineContext): Promise<PatternMatch[]> {
+    const reg = ctx.detectorRegistry;
+    if (!reg) return [];
+    const aggression = ctx.config.behavior.aggression ?? 'medium';
+    const preset = (ctx.config.behavior.compliance ?? '').toLowerCase();
+    const out = await reg.detectByCapability(
+      ['pii', 'infra'],
+      text,
+      { aggression, preset },
+      (id, err) => log.warn('detector plugin threw', { id, err: String(err) }),
+    );
+    return out.map((h) => ({
+      type: h.type,
+      match: h.match,
+      offset: h.offset,
+      length: h.length,
+    }));
   }
 
   private applyConfigReplacements(
