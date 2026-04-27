@@ -43,7 +43,7 @@ audit-full:
 	npm audit --json
 
 sbom:
-	npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+	npx --yes @cyclonedx/cyclonedx-npm@4.2.1 --output-file sbom.cdx.json
 
 licenses:
 	npx --yes license-checker --production --summary

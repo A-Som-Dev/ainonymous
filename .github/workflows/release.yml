@@ -35,15 +35,15 @@ jobs:
             exit 1
           fi
 
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm@4.2.1 --output-file sbom.cdx.json
+
       - name: Pack npm tarball
         id: pack
         run: |
           TARBALL=$(npm pack --silent)
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           sha256sum "$TARBALL" > "$TARBALL.sha256"
-
-      - name: Generate CycloneDX SBOM
-        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
 
       - name: Dry-run npm publish to catch version/name mismatches
         run: npm publish --dry-run --provenance --access public
